@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type PartShape = 'sphere' | 'box' | 'capsule' | 'cylinder' | 'cone' | 'torus';
+export type PartShape = 'sphere' | 'box' | 'capsule' | 'cylinder' | 'cone' | 'torus' | 'spiky';
 
 export interface Part {
   id: string;
@@ -19,6 +19,14 @@ export interface Part {
   roughness: number;  // 0 to 1
   metalness: number;  // 0 to 1
   mirrorId?: string;  // ID of the paired symmetrical part, if any
+  initialHeadRelativePosition?: [number, number, number]; // Offset relative to default head center
+  sculpt?: {
+    pinch?: number;     // nose / snout stretch (-1 to 1)
+    taper?: number;     // narrowing from rear to front (-1 to 1)
+    flatten?: number;   // squash or boxy flattening (-1 to 1)
+    ridges?: number;    // segment waves / layer ridges (0 to 1)
+    noise?: number;     // hand-sculpted organic clay bumps (0 to 1)
+  };
 }
 
 export type EyeExpression = 'classic' | 'happy' | 'sleepy' | 'blinking' | 'anime';

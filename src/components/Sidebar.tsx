@@ -6,7 +6,8 @@
 import React, { useState } from 'react';
 import { Part, FaceConfig, EyeExpression, MouthExpression } from '../types';
 import { ANIMAL_PRESETS, ACCESSORY_TEMPLATES, PALETTES } from '../data/presets';
-import { Sparkles, Sliders, Smile, Award, Settings, Plus, Trash2, HelpCircle, Activity, Zap, Shield, HelpCircle as InfoIcon } from 'lucide-react';
+import { Sparkles, Sliders, Smile, Award, Settings, Plus, Trash2, HelpCircle, Activity, Zap, Shield, Eye, EyeOff, HelpCircle as InfoIcon } from 'lucide-react';
+import confetti from 'canvas-confetti';
 
 interface SidebarProps {
   parts: Part[];
@@ -34,6 +35,14 @@ interface SidebarProps {
   setWiggleSpeed: (val: number) => void;
   wiggleAmplitude: number;
   setWiggleAmplitude: (val: number) => void;
+
+  // FDM / Filament states
+  fdmEnabled: boolean;
+  setFdmEnabled: (v: boolean) => void;
+  fdmDensity: number;
+  setFdmDensity: (v: number) => void;
+  filamentStyle: 'matte' | 'silk_standard' | 'silk_dual' | 'silk_rainbow';
+  setFilamentStyle: (v: 'matte' | 'silk_standard' | 'silk_dual' | 'silk_rainbow') => void;
 }
 
 export function Sidebar({
@@ -62,8 +71,87 @@ export function Sidebar({
   setWiggleSpeed,
   wiggleAmplitude,
   setWiggleAmplitude,
+
+  // FDM / Filament props
+  fdmEnabled,
+  setFdmEnabled,
+  fdmDensity,
+  setFdmDensity,
+  filamentStyle,
+  setFilamentStyle,
 }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<'presets' | 'flexi' | 'face' | 'parts' | 'accessories' | 'scene'>('presets');
+  const [syncSculptGlobally, setSyncSculptGlobally] = useState<boolean>(false);
+  const [linkHeadParts, setLinkHeadParts] = useState<boolean>(true);
+
+  // Helper to get or calculate initial relative position of part to head
+  const getInitialHeadRelativePosition = (part: Part, currentParts: Part[]): [number, number, number] => {
+    if (part.initialHeadRelativePosition) {
+      return part.initialHeadRelativePosition;
+    }
+    const head = currentParts.find((p) => p.id === 'head');
+    if (head) {
+      return [
+        part.position[0] - head.position[0],
+        part.position[1] - head.position[1],
+        part.position[2] - head.position[2],
+      ];
+    }
+    return [0, 0, 0];
+  };
+
+  // Re-align ears, snout, horns, and all head accessories perfectly onto the head
+  const handleAutoAlignCompanionParts = () => {
+    const headPart = parts.find((p) => p.id === 'head');
+    if (!headPart) return;
+
+    setParts((prevParts) => {
+      return prevParts.map((part) => {
+        if (
+          part.id !== 'head' &&
+          (part.category === 'head' ||
+            part.category === 'face' ||
+            part.category === 'accessories' ||
+            part.name.toLowerCase().includes('oreja') ||
+            part.name.toLowerCase().includes('cuerno') ||
+            part.name.toLowerCase().includes('hocico') ||
+            part.name.toLowerCase().includes('sombrero') ||
+            part.name.toLowerCase().includes('corona') ||
+            part.name.toLowerCase().includes('lazo') ||
+            part.name.toLowerCase().includes('ala'))
+        ) {
+          const relativePos = getInitialHeadRelativePosition(part, prevParts);
+          return {
+            ...part,
+            position: [
+              headPart.position[0] + relativePos[0],
+              headPart.position[1] + relativePos[1],
+              headPart.position[2] + relativePos[2],
+            ],
+            initialHeadRelativePosition: relativePos,
+          };
+        }
+        return part;
+      });
+    });
+
+    confetti({
+      particleCount: 30,
+      spread: 45,
+      origin: { y: 0.8 },
+      colors: ['#a855f7', '#ec4899'],
+    });
+  };
+
+  const propagateSculptToAll = () => {
+    if (!selectedPart || !selectedPart.sculpt) return;
+    setParts((prev) =>
+      prev.map((p) => ({
+        ...p,
+        sculpt: { ...selectedPart.sculpt }
+      }))
+    );
+  };
 
   // Find currently selected part
   const selectedPart = parts.find((p) => p.id === selectedPartId);
@@ -74,7 +162,56 @@ export function Sidebar({
       const mainPart = prevParts.find((p) => p.id === partId);
       if (!mainPart) return prevParts;
 
+      // Handle real-time propagation of head movement to ears and accessories
+      if (partId === 'head' && updates.position !== undefined && linkHeadParts) {
+        const dx = updates.position[0] - mainPart.position[0];
+        const dy = updates.position[1] - mainPart.position[1];
+        const dz = updates.position[2] - mainPart.position[2];
+
+        return prevParts.map((part) => {
+          if (part.id === 'head') {
+            return { ...part, ...updates };
+          }
+          if (
+            part.category === 'head' ||
+            part.category === 'face' ||
+            part.category === 'accessories' ||
+            part.name.toLowerCase().includes('oreja') ||
+            part.name.toLowerCase().includes('cuerno') ||
+            part.name.toLowerCase().includes('hocico') ||
+            part.name.toLowerCase().includes('sombrero') ||
+            part.name.toLowerCase().includes('corona') ||
+            part.name.toLowerCase().includes('lazo') ||
+            part.name.toLowerCase().includes('ala')
+          ) {
+            const relativeOffset = part.initialHeadRelativePosition || [
+              part.position[0] - mainPart.position[0],
+              part.position[1] - mainPart.position[1],
+              part.position[2] - mainPart.position[2],
+            ];
+            return {
+              ...part,
+              position: [
+                part.position[0] + dx,
+                part.position[1] + dy,
+                part.position[2] + dz,
+              ],
+              initialHeadRelativePosition: relativeOffset,
+            };
+          }
+          return part;
+        });
+      }
+
       return prevParts.map((part) => {
+        // If syncing sculpt globally, update sculpt for all parts!
+        if (syncSculptGlobally && updates.sculpt !== undefined) {
+          return {
+            ...part,
+            sculpt: { ...updates.sculpt }
+          };
+        }
+
         if (part.id === partId) {
           return { ...part, ...updates };
         }
@@ -95,6 +232,9 @@ export function Sidebar({
               -updates.rotation[1],
               -updates.rotation[2]
             ];
+          }
+          if (updates.sculpt !== undefined) {
+            mirroredUpdates.sculpt = { ...updates.sculpt };
           }
           return { ...part, ...mirroredUpdates };
         }
@@ -126,9 +266,16 @@ export function Sidebar({
     setSelectedPartId(freshId);
   };
 
-  // Delete accessory
-  const handleDeleteAccessory = (id: string) => {
-    setParts((prev) => prev.filter((p) => p.id !== id));
+  // Delete part
+  const handleDeletePart = (id: string) => {
+    setParts((prev) => {
+      const toDel = prev.find((p) => p.id === id);
+      let filtered = prev.filter((p) => p.id !== id);
+      if (toDel && toDel.mirrorId) {
+        filtered = filtered.filter((p) => p.id !== toDel.mirrorId);
+      }
+      return filtered;
+    });
     if (selectedPartId === id) setSelectedPartId(null);
   };
 
@@ -166,7 +313,7 @@ export function Sidebar({
       </div>
 
       {/* Sidebar Content (Scrollable Container) */}
-      <div className="flex-1 overflow-y-auto p-4 lg:p-5 h-full space-y-6">
+      <div className="flex-1 h-0 overflow-y-auto p-4 lg:p-5 space-y-6 pb-28">
         
         {/* TAB 1: PRESETS */}
         {activeTab === 'presets' && (
@@ -528,32 +675,89 @@ export function Sidebar({
                 <option value="">-- Ninguna seleccionada --</option>
                 {parts.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} {p.category === 'accessories' ? '✨' : ''}
+                    {p.name} {p.category === 'accessories' ? '✨' : ''} {!p.visible ? '(Oculto)' : ''}
                   </option>
                 ))}
               </select>
             </div>
 
+            {/* Auto-align & Head Linkage helper */}
+            <div className="bg-gradient-to-r from-purple-500/5 to-pink-500/5 dark:from-purple-500/10 dark:to-pink-500/10 p-3 rounded-2xl border border-purple-500/10 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider flex items-center gap-1">
+                    ⚡ Vincular Accesorios a Cabeza
+                  </span>
+                  <p className="text-[9px] text-gray-400 dark:text-gray-500 leading-tight">
+                    Mueve orejas, hocico y sombreros junto con la cabeza
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLinkHeadParts(!linkHeadParts)}
+                  className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
+                    linkHeadParts ? 'bg-purple-500' : 'bg-slate-200 dark:bg-zinc-800'
+                  }`}
+                >
+                  <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform duration-200 ${
+                    linkHeadParts ? 'translate-x-4' : 'translate-x-0'
+                  }`} />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleAutoAlignCompanionParts}
+                className="w-full text-center text-[10px] font-bold py-1.5 px-3 bg-white dark:bg-zinc-900 border border-purple-500/15 hover:border-purple-550 hover:bg-purple-500/5 dark:border-purple-550/20 text-purple-600 dark:text-purple-305 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                🔗 Re-alinear y Acoplar Orejas/Deco a la Cabeza
+              </button>
+            </div>
+
             {selectedPart ? (
               <div className="p-4 bg-slate-50 dark:bg-zinc-900/60 rounded-[24px] border border-slate-100 dark:border-zinc-850 space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-gray-150 dark:border-zinc-800">
-                  <div>
-                    <span className="text-xs font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wide">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wide flex items-center gap-1">
                       {selectedPart.name}
+                      {!selectedPart.visible && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.2 bg-gray-200 text-gray-750 dark:bg-zinc-800 dark:text-gray-400 rounded">
+                          Invisible 🙈
+                        </span>
+                      )}
                     </span>
-                    <span className="ml-2 text-[9px] px-1.5 py-0.5 bg-pink-100 text-pink-700 dark:bg-pink-950 dark:text-pink-300 font-bold rounded">
+                    <span className="text-[8px] text-gray-450 mt-0.5 font-mono">
                       ID: {selectedPart.id}
                     </span>
                   </div>
-                  {selectedPart.category === 'accessories' && (
+
+                  <div className="flex items-center gap-1">
+                    {/* Visibility Toggle Switch */}
                     <button
-                      onClick={() => handleDeleteAccessory(selectedPart.id)}
-                      className="text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20 p-1.5 rounded-lg cursor-pointer"
-                      title="Quitar accesorio"
+                      type="button"
+                      onClick={() => updatePartProperty(selectedPart.id, { visible: !selectedPart.visible })}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                        selectedPart.visible
+                          ? 'text-pink-550 hover:bg-pink-500/10 dark:hover:bg-pink-500/20'
+                          : 'text-gray-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
+                      }`}
+                      title={selectedPart.visible ? "Ocultar elemento" : "Mostrar elemento"}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      {selectedPart.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                     </button>
-                  )}
+
+                    {/* Delete button (except for body/head) */}
+                    {selectedPart.id !== 'body' && selectedPart.id !== 'head' && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePart(selectedPart.id)}
+                        className="text-red-500 hover:text-red-700 hover:bg-red-500/10 dark:hover:bg-red-500/20 p-1.5 rounded-lg cursor-pointer transition-colors"
+                        title="Eliminar elemento"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Color Selector */}
@@ -583,6 +787,273 @@ export function Sidebar({
                       </div>
                     ))}
                   </div>
+                </div>
+
+                {/* Part Shape Selection */}
+                <div className="space-y-2 pt-2 border-t border-slate-150 dark:border-zinc-800">
+                  <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">Forma 3D de la Pieza (Mesh Shape)</label>
+                  <div className="grid grid-cols-4 gap-1 bg-slate-100 dark:bg-zinc-850 p-1 rounded-xl">
+                    {[
+                      { id: 'sphere', label: 'Esfera 🔴' },
+                      { id: 'box', label: 'Caja 📦' },
+                      { id: 'capsule', label: 'Cápsu 💊' },
+                      { id: 'cylinder', label: 'Cilin 🔋' },
+                      { id: 'cone', label: 'Cono 🔺' },
+                      { id: 'torus', label: 'Rosca 🍩' },
+                      { id: 'spiky', label: 'Púas 🦔' },
+                    ].map((sh) => (
+                      <button
+                        key={sh.id}
+                        type="button"
+                        onClick={() => updatePartProperty(selectedPart.id, { shape: sh.id as any })}
+                        className={`py-1.5 px-0.5 text-[9px] rounded-lg border text-center transition-all cursor-pointer ${
+                          selectedPart.shape === sh.id
+                            ? 'bg-pink-500 border-pink-500 text-white font-bold'
+                            : 'bg-transparent border-transparent text-slate-650 dark:text-gray-400 hover:bg-slate-205 dark:hover:bg-zinc-800'
+                        }`}
+                      >
+                        {sh.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* TALLER DE ESCULTURA 3D 🏺 */}
+                <div className="space-y-3.5 pt-3.5 border-t border-slate-150 dark:border-zinc-800 bg-gradient-to-br from-pink-500/5 to-purple-500/5 dark:from-pink-500/10 dark:to-purple-500/10 p-3.5 rounded-2xl border border-pink-550/10 dark:border-pink-400/15">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-pink-600 dark:text-pink-400 uppercase tracking-widest flex items-center gap-1.5">
+                      🏺 Taller de Escultura 3D
+                    </span>
+                    {(selectedPart.sculpt && (
+                      (selectedPart.sculpt.pinch || 0) !== 0 ||
+                      (selectedPart.sculpt.taper || 0) !== 0 ||
+                      (selectedPart.sculpt.flatten || 0) !== 0 ||
+                      (selectedPart.sculpt.ridges || 0) !== 0 ||
+                      (selectedPart.sculpt.noise || 0) !== 0
+                    )) && (
+                      <button
+                        type="button"
+                        onClick={() => updatePartProperty(selectedPart.id, { sculpt: { pinch: 0, taper: 0, flatten: 0, ridges: 0, noise: 0 } })}
+                        className="text-[9px] font-bold text-pink-600 dark:text-pink-450 hover:text-pink-800 dark:hover:text-pink-300 bg-pink-100/60 dark:bg-pink-950/20 px-2 py-0.5 rounded-lg cursor-pointer transition-all"
+                      >
+                        RESTAURAR
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-normal">
+                    Modelado digital interactivo. ¡Evoluciona las formas tradicionales a nivel de esculpido de arcilla!
+                  </p>
+
+                  {/* Global propagation tools */}
+                  <div className="bg-white/60 dark:bg-zinc-900/40 p-2.5 rounded-xl border border-pink-100 dark:border-pink-900/20 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[10px] font-bold text-gray-650 dark:text-gray-300 flex items-center gap-1.5 cursor-pointer selection:bg-transparent select-none">
+                        <input
+                          type="checkbox"
+                          checked={syncSculptGlobally}
+                          onChange={(e) => setSyncSculptGlobally(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded border-gray-300 text-pink-550 focus:ring-pink-400 accent-pink-550 cursor-pointer"
+                        />
+                        <span>Sincronizar escultura en tiempo real 🔄</span>
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={propagateSculptToAll}
+                      disabled={!selectedPart.sculpt}
+                      className="w-full text-center text-[9px] font-extrabold py-1.5 px-3 bg-gradient-to-r from-pink-500/10 to-purple-500/10 hover:from-pink-550 hover:to-purple-600 hover:text-white text-pink-650 dark:text-pink-300 disabled:opacity-40 disabled:hover:from-transparent disabled:hover:bg-transparent disabled:hover:text-pink-650 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 border border-pink-500/10"
+                    >
+                      💥 Propagar escultura actual a TODAS las piezas
+                    </button>
+                  </div>
+
+                  {/* Slider: Pinch */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-550 dark:text-gray-305 font-semibold">Tirar Hocico / Pellizco (Pinch)</span>
+                      <span className="font-mono text-pink-650 dark:text-pink-400 font-bold">{(selectedPart.sculpt?.pinch ?? 0).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-1.0"
+                      max="1.0"
+                      step="0.05"
+                      value={selectedPart.sculpt?.pinch ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        updatePartProperty(selectedPart.id, {
+                          sculpt: { ...(selectedPart.sculpt || {}), pinch: val }
+                        });
+                      }}
+                      className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-gray-405">
+                      <span>Cara Chata ◄</span>
+                      <span>► Hocico / Punta</span>
+                    </div>
+                  </div>
+
+                  {/* Slider: Taper */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-550 dark:text-gray-305 font-semibold">Cónico / Estrechar (Taper)</span>
+                      <span className="font-mono text-pink-655 dark:text-pink-400 font-bold">{(selectedPart.sculpt?.taper ?? 0).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-1.0"
+                      max="1.0"
+                      step="0.05"
+                      value={selectedPart.sculpt?.taper ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        updatePartProperty(selectedPart.id, {
+                          sculpt: { ...(selectedPart.sculpt || {}), taper: val }
+                        });
+                      }}
+                      className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-gray-405">
+                      <span>Ancho Frontal ◄</span>
+                      <span>► Cola / Cono Fino</span>
+                    </div>
+                  </div>
+
+                  {/* Slider: Flatten */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-550 dark:text-gray-305 font-semibold">Aplanar para Impresión (Flatten)</span>
+                      <span className="font-mono text-pink-655 dark:text-pink-400 font-bold">{(selectedPart.sculpt?.flatten ?? 0).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-1.0"
+                      max="1.0"
+                      step="0.05"
+                      value={selectedPart.sculpt?.flatten ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        updatePartProperty(selectedPart.id, {
+                          sculpt: { ...(selectedPart.sculpt || {}), flatten: val }
+                        });
+                      }}
+                      className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-gray-405">
+                      <span>Boxy/Escuadra ◄</span>
+                      <span>► Base Plana Suave</span>
+                    </div>
+                  </div>
+
+                  {/* Slider: Ridges */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-550 dark:text-gray-305 font-semibold">Anillos de Textura (Ridges)</span>
+                      <span className="font-mono text-pink-655 dark:text-pink-400 font-bold">{(selectedPart.sculpt?.ridges ?? 0).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.0"
+                      max="1.0"
+                      step="0.05"
+                      value={selectedPart.sculpt?.ridges ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        updatePartProperty(selectedPart.id, {
+                          sculpt: { ...(selectedPart.sculpt || {}), ridges: val }
+                        });
+                      }}
+                      className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Slider: Noise */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-550 dark:text-gray-305 font-semibold">Arcilla Sólida / Rugoso (Noise)</span>
+                      <span className="font-mono text-pink-655 dark:text-pink-400 font-bold">{(selectedPart.sculpt?.noise ?? 0).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.0"
+                      max="1.0"
+                      step="0.02"
+                      value={selectedPart.sculpt?.noise ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        updatePartProperty(selectedPart.id, {
+                          sculpt: { ...(selectedPart.sculpt || {}), noise: val }
+                        });
+                      }}
+                      className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* Position X */}
+                <div className="space-y-2 pt-2 border-t border-slate-150 dark:border-zinc-800">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-gray-550 font-medium">Posición Horizontal (Izquierda ◄ / ► Derecha X)</span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300 font-bold">{selectedPart.position[0].toFixed(2)}m</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-2.0"
+                    max="2.0"
+                    step="0.02"
+                    value={selectedPart.position[0]}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      updatePartProperty(selectedPart.id, {
+                        position: [val, selectedPart.position[1], selectedPart.position[2]],
+                      });
+                    }}
+                    className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                {/* Position Y */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-gray-550 font-medium">Posición Vertical (Abajo ▼ / ▲ Arriba Y)</span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300 font-bold">{selectedPart.position[1].toFixed(2)}m</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-1.0"
+                    max="3.0"
+                    step="0.02"
+                    value={selectedPart.position[1]}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      updatePartProperty(selectedPart.id, {
+                        position: [selectedPart.position[0], val, selectedPart.position[2]],
+                      });
+                    }}
+                    className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                {/* Position Z */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-gray-550 font-medium">Posición Profundidad (Atrás ◄ / ► Adelante Z)</span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300 font-bold">{selectedPart.position[2].toFixed(2)}m</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-2.0"
+                    max="2.0"
+                    step="0.02"
+                    value={selectedPart.position[2]}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      updatePartProperty(selectedPart.id, {
+                        position: [selectedPart.position[0], selectedPart.position[1], val],
+                      });
+                    }}
+                    className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                  />
                 </div>
 
                 {/* Scale X */}
@@ -720,11 +1191,84 @@ export function Sidebar({
         {activeTab === 'scene' && (
           <div className="space-y-4">
             <div>
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">Escenario & Fotografía</h3>
-              <p className="text-xs text-gray-400 dark:text-gray-555">Modifica el escenario en el que posa tu adorable animal 3D.</p>
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">Material de Impresión & Escena</h3>
+              <p className="text-xs text-gray-400 dark:text-gray-555">Configura el filamento plástico, la laminación FDM y la iluminación.</p>
             </div>
 
-            <div className="flex flex-col gap-4 pt-2">
+            {/* Simulación Filamento FDM (WOW!) */}
+            <div className="p-3.5 bg-gradient-to-br from-violet-500/5 to-pink-500/5 dark:from-violet-500/10 dark:to-pink-500/10 border border-violet-500/15 dark:border-violet-400/20 rounded-2xl space-y-3.5">
+              <span className="text-[10px] font-extrabold text-violet-600 dark:text-violet-400 uppercase tracking-widest flex items-center gap-1.5">
+                🔌 Filamento Plástico PLA (3D Print Base)
+              </span>
+
+              {/* Styles of filament */}
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { id: 'matte', label: '🔴 Mate Sólido', desc: 'Matte Standard PLA' },
+                  { id: 'silk_standard', label: '✨ Seda Monocolor', desc: 'Glossy Silk PLA' },
+                  { id: 'silk_dual', label: '🧬 Seda Bicapa', desc: 'Chameleon Red/Cyan' },
+                  { id: 'silk_rainbow', label: '🌈 Arcoíris Silk', desc: 'Vertical Gradient PLA' },
+                ].map((sty) => (
+                  <button
+                    key={sty.id}
+                    type="button"
+                    onClick={() => setFilamentStyle(sty.id as any)}
+                    className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                      filamentStyle === sty.id
+                        ? 'bg-violet-600 border-violet-600 text-white font-bold shadow-md shadow-violet-500/10'
+                        : 'bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-gray-700 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-zinc-805'
+                    }`}
+                  >
+                    <div className="text-[10px] font-bold">{sty.label}</div>
+                    <div className={`text-[8px] mt-0.5 ${filamentStyle === sty.id ? 'text-violet-200' : 'text-gray-400'}`}>{sty.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {/* FDM Layers simulator height */}
+              <div className="space-y-1.5 pt-2 border-t border-slate-200/50 dark:border-zinc-800">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">Simulador de Capas FDM</div>
+                    <div className="text-[10px] text-gray-400">Activa el relieve de líneas de deposición de plástico fundido (PLA)</div>
+                  </div>
+                  <button
+                    onClick={() => setFdmEnabled(!fdmEnabled)}
+                    className={`w-10 h-5.5 rounded-full p-0.5 transition-colors cursor-pointer ${
+                      fdmEnabled ? 'bg-violet-500' : 'bg-slate-200 dark:bg-zinc-850'
+                    }`}
+                  >
+                    <div className={`w-4.5 h-4.5 bg-white rounded-full shadow-sm transform transition-transform duration-200 ${
+                      fdmEnabled ? 'translate-x-4.5' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+
+                {fdmEnabled && (
+                  <div className="space-y-1.5 pt-2 animate-fade-in">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-550 font-semibold">Resolución del Laminado (Grosor de capas)</span>
+                      <span className="font-mono text-violet-650 dark:text-violet-400 font-bold">{fdmDensity === 300 ? '0.12mm (Ultra Fino)' : fdmDensity === 200 ? '0.20mm (Estándar)' : '0.28mm (Rápido Coarse)'}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="100"
+                      max="300"
+                      step="50"
+                      value={fdmDensity}
+                      onChange={(e) => setFdmDensity(parseInt(e.target.value, 10))}
+                      className="w-full h-1 accent-violet-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-gray-400">
+                      <span>0.28mm Rápido ◄</span>
+                      <span>► 0.12mm Detallado</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 pt-1">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">Mostrar Pedestal</div>

@@ -23,6 +23,9 @@ interface ThreeCanvasProps {
   connectorType?: 'ring' | 'ball' | 'flexible';
   wiggleSpeed?: number;
   wiggleAmplitude?: number;
+  fdmEnabled?: boolean;
+  fdmDensity?: number;
+  filamentStyle?: 'matte' | 'silk_standard' | 'silk_dual' | 'silk_rainbow';
 }
 
 export interface ThreeCanvasHandle {
@@ -43,6 +46,9 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
   connectorType = 'ring',
   wiggleSpeed = 2.0,
   wiggleAmplitude = 0.15,
+  fdmEnabled = false,
+  fdmDensity = 150,
+  filamentStyle = 'silk_standard',
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -56,6 +62,8 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
   const outlineMeshRef = useRef<THREE.LineSegments | null>(null);
   const pedestalRef = useRef<THREE.Mesh | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
+  const bounceLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const rimLightRef = useRef<THREE.DirectionalLight | null>(null);
 
   // Store flexible configurations in a Ref to read in the render loop without lagging
   const wiggleParamsRef = useRef({
@@ -170,11 +178,13 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
     const bounceLight = new THREE.DirectionalLight('#fff0e0', 0.35);
     bounceLight.position.set(-2, 0.5, -2);
     scene.add(bounceLight);
+    bounceLightRef.current = bounceLight;
 
     // Soft rim light from back-top
     const rimLight = new THREE.DirectionalLight('#e0f0ff', 0.3);
     rimLight.position.set(0, 3, -4);
     scene.add(rimLight);
+    rimLightRef.current = rimLight;
 
     // PEDESTAL (Soft circular stage)
     const pedestalGeo = new THREE.CylinderGeometry(1.2, 1.3, 0.15, 64);
@@ -333,6 +343,25 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
     if (gridHelperRef.current) gridHelperRef.current.visible = showGrid;
   }, [showPedestal, showGrid]);
 
+  // Dynamic Filament Style light shifts (Chameleon co-extrusion PLA highlight)
+  useEffect(() => {
+    if (bounceLightRef.current && rimLightRef.current) {
+      if (filamentStyle === 'silk_dual') {
+        // Shimmering Red-Blue/Pink-Cyan dual-tone reflections
+        bounceLightRef.current.color.set('#ff00bb');
+        bounceLightRef.current.intensity = 1.35;
+        rimLightRef.current.color.set('#00e8ff');
+        rimLightRef.current.intensity = 1.25;
+      } else {
+        // Normal warm/cool studio bounce lights
+        bounceLightRef.current.color.set('#fff0e0');
+        bounceLightRef.current.intensity = 0.35;
+        rimLightRef.current.color.set('#e0f0ff');
+        rimLightRef.current.intensity = 0.3;
+      }
+    }
+  }, [filamentStyle]);
+
   // Update Scene when Parts or Face settings change
   useEffect(() => {
     const scene = sceneRef.current;
@@ -354,6 +383,96 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       });
       animalGroup.remove(child);
     }
+
+    // FDM 3D printing layer lines bump map
+    const generateFdmTexture = (enabled: boolean, density: number) => {
+      if (!enabled) return null;
+      const size = 128;
+      const canvas = document.createElement('canvas');
+      canvas.width = 16;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#808080';
+        ctx.fillRect(0, 0, 16, size);
+        for (let y = 0; y < size; y++) {
+          const val = Math.floor((Math.sin((y / size) * Math.PI * 2 * 16) * 0.5 + 0.5) * 78 + 89);
+          ctx.fillStyle = `rgb(${val}, ${val}, ${val})`;
+          ctx.fillRect(0, y, 16, 1);
+        }
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1, density * 0.5);
+      return tex;
+    };
+
+    // Vertical rainbow color gradient
+    const generateRainbowTexture = (style: string) => {
+      if (style !== 'silk_rainbow') return null;
+      const size = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = 16;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const grad = ctx.createLinearGradient(0, 0, 0, size);
+        grad.addColorStop(0.0, '#ff3030'); // Red
+        grad.addColorStop(0.2, '#ff9000'); // Orange
+        grad.addColorStop(0.4, '#4cd964'); // Green
+        grad.addColorStop(0.6, '#00e5ff'); // Cyan
+        grad.addColorStop(0.8, '#5856d6'); // Royal Blue
+        grad.addColorStop(1.0, '#ff2d55'); // Magenta/Pink
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 16, size);
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1, 4);
+      return tex;
+    };
+
+    const fdmTex = generateFdmTexture(fdmEnabled, fdmDensity);
+    const rainbowTex = generateRainbowTexture(filamentStyle);
+
+    // Retrieve customized materials to replicate amazing FDM PLA/matte/silk/chameleon outcomes
+    const getMaterialForPart = (partColor: string, partRoughness: number, partMetalness: number) => {
+      let r = partRoughness;
+      let m = partMetalness;
+
+      if (filamentStyle === 'matte') {
+        r = 0.95;
+        m = 0.05;
+      } else if (filamentStyle === 'silk_standard') {
+        r = 0.22;
+        m = 0.65;
+      } else if (filamentStyle === 'silk_dual') {
+        // High shined surface reflecting chameleon colors
+        r = 0.16;
+        m = 0.85;
+      } else if (filamentStyle === 'silk_rainbow') {
+        r = 0.22;
+        m = 0.55;
+      }
+
+      const mat = new THREE.MeshStandardMaterial({
+        color: filamentStyle === 'silk_rainbow' ? '#ffffff' : new THREE.Color(partColor),
+        roughness: r,
+        metalness: m,
+      });
+
+      if (fdmTex) {
+        mat.bumpMap = fdmTex;
+        mat.bumpScale = 0.0075;
+      }
+      if (rainbowTex) {
+        mat.map = rainbowTex;
+      }
+
+      return mat;
+    };
 
     // Geometry Factory
     const getGeometry = (shape: string) => {
@@ -383,6 +502,130 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       return geo;
     };
 
+    // Apply custom sculpt / sculpture deformations on vertex coordinates directly
+    const applySculptDeformation = (geometry: THREE.BufferGeometry, part: Part) => {
+      if (!part.sculpt) return;
+      const { pinch = 0, taper = 0, flatten = 0, ridges = 0, noise = 0 } = part.sculpt;
+      if (pinch === 0 && taper === 0 && flatten === 0 && ridges === 0 && noise === 0) return;
+
+      const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+      if (!posAttr) return;
+
+      geometry.computeBoundingBox();
+      const bbox = geometry.boundingBox || new THREE.Box3();
+      const center = new THREE.Vector3();
+      bbox.getCenter(center);
+      const size = new THREE.Vector3();
+      bbox.getSize(size);
+
+      for (let i = 0; i < posAttr.count; i++) {
+        let x = posAttr.getX(i);
+        let y = posAttr.getY(i);
+        let z = posAttr.getZ(i);
+
+        const rx = size.x > 0 ? (x - center.x) / size.x : 0;
+        const ry = size.y > 0 ? (y - center.y) / size.y : 0;
+        const rz = size.z > 0 ? (z - center.z) / size.z : 0;
+
+        // 1. PINCH (Pointy snout / flattened muzzle)
+        if (pinch !== 0) {
+          const forwardFactor = rz + 0.5; // ranges 0 (rear) to 1 (front)
+          if (pinch > 0) {
+            z += Math.pow(forwardFactor, 2) * pinch * size.z * 0.45;
+            const pointyScale = Math.max(0.12, 1.0 - Math.pow(forwardFactor, 1.5) * pinch * 0.65);
+            x *= pointyScale;
+            y *= pointyScale;
+          } else {
+            z += Math.pow(forwardFactor, 1.5) * pinch * size.z * 0.35;
+          }
+        }
+
+        // 2. TAPER (Gradual narrowing)
+        if (taper !== 0) {
+          const tFactor = 1.0 - (rz + 0.5) * taper * 0.72;
+          const safeTFactor = Math.max(0.1, tFactor);
+          x *= safeTFactor;
+          y *= safeTFactor;
+        }
+
+        // 3. FLATTEN (Bottom or Boxy)
+        if (flatten !== 0) {
+          if (flatten > 0) {
+            if (ry < 0) {
+              const flatFactor = 1.0 - Math.abs(ry) * flatten * 0.82;
+              y *= Math.max(0.1, flatFactor);
+            }
+          } else {
+            const squashY = 1.0 - Math.abs(ry) * Math.abs(flatten) * 0.45;
+            const squashX = 1.0 - Math.abs(rx) * Math.abs(flatten) * 0.45;
+            y *= Math.max(0.15, squashY);
+            x *= Math.max(0.15, squashX);
+          }
+        }
+
+        // 4. RIDGES (Stratified rings)
+        if (ridges > 0) {
+          const freq = 22.0;
+          const wave = 1.0 + Math.sin(rz * freq) * ridges * 0.12;
+          x *= wave;
+          y *= wave;
+        }
+
+        // 5. NOISE (Random organic hand-sculpted bumps)
+        if (noise > 0) {
+          const freqX = rx * 14.0;
+          const freqY = ry * 14.0;
+          const freqZ = rz * 14.0;
+          const bump = (Math.sin(freqX * 3.1) * Math.cos(freqY * 2.8) +
+                        Math.sin(freqZ * 4.2) * Math.cos(freqX * 2.1) +
+                        Math.sin(freqY * 3.4) * Math.cos(freqZ * 2.4)) / 3.0;
+          
+          const dirX = x - center.x;
+          const dirY = y - center.y;
+          const dirZ = z - center.z;
+          const len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ) || 1.0;
+          
+          const displace = bump * noise * size.x * 0.12;
+          x += (dirX / len) * displace;
+          y += (dirY / len) * displace;
+          z += (dirZ / len) * displace;
+        }
+
+        posAttr.setXYZ(i, x, y, z);
+      }
+
+      posAttr.needsUpdate = true;
+      geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
+      geometry.computeBoundingSphere();
+    };
+
+    // Procedural spikes generator for 'spiky' shapes
+    const addSpikesIfSpiky = (mesh: THREE.Mesh, shape: string, material: THREE.Material) => {
+      if (shape !== 'spiky') return;
+      
+      const spikeGeo = new THREE.ConeGeometry(0.12, 0.35, 8);
+      spikeGeo.rotateX(Math.PI / 2); // align pointing out
+      
+      const spikePositions = [
+        { pos: [0, 0.45, -0.2], rot: [-Math.PI / 4, 0, 0] },
+        { pos: [-0.35, 0.3, -0.1], rot: [-Math.PI / 6, -Math.PI / 4, 0] },
+        { pos: [0.35, 0.3, -0.1], rot: [-Math.PI / 6, Math.PI / 4, 0] },
+        { pos: [-0.4, 0.1, -0.2], rot: [0, -Math.PI / 3, 0] },
+        { pos: [0.4, 0.1, -0.2], rot: [0, Math.PI / 3, 0] },
+        { pos: [0, 0.25, -0.4], rot: [-Math.PI / 3, 0, 0] },
+      ];
+
+      spikePositions.forEach((sp) => {
+        const spikeMesh = new THREE.Mesh(spikeGeo, material);
+        spikeMesh.position.set(sp.pos[0], sp.pos[1], sp.pos[2]);
+        spikeMesh.rotation.set(sp.rot[0], sp.rot[1], sp.rot[2]);
+        spikeMesh.castShadow = true;
+        spikeMesh.receiveShadow = true;
+        mesh.add(spikeMesh);
+      });
+    };
+
     // Store references of body parts to organize layout parenting easily
     const bodyPart = parts.find(p => p.id === 'body');
     const headPart = parts.find(p => p.id === 'head');
@@ -396,11 +639,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
 
       // EXCEPTION: If flexible and part is body, we generate continuous segments connected by links
       if (isFlexible && part.id === 'body') {
-        const material = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(part.color),
-          roughness: part.roughness ?? 0.8,
-          metalness: part.metalness ?? 0.15,
-        });
+        const material = getMaterialForPart(part.color, part.roughness ?? 0.8, part.metalness ?? 0.15);
 
         for (let idx = 0; idx < segmentCount; idx++) {
           // Slowly taper segments down
@@ -408,9 +647,11 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
           const scaleFactor = Math.max(0.24, 1.0 - t * 0.62);
 
           const segGeo = getGeometry(part.shape);
+          applySculptDeformation(segGeo, part);
           const segMesh = new THREE.Mesh(segGeo, material);
           
           segMesh.name = `Segment_${idx}`;
+          addSpikesIfSpiky(segMesh, part.shape, material);
           // Make it selectable as the primary body part
           segMesh.userData = { 
             partId: part.id, 
@@ -503,11 +744,8 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
 
       // EXCEPTION: reposition limbs & tails to correct parents if flexible structure is active
       const geometry = getGeometry(part.shape);
-      const material = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(part.color),
-        roughness: part.roughness ?? 0.8,
-        metalness: part.metalness ?? 0.15,
-      });
+      applySculptDeformation(geometry, part);
+      const material = getMaterialForPart(part.color, part.roughness ?? 0.8, part.metalness ?? 0.15);
 
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = part.name;
@@ -515,6 +753,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
 
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      addSpikesIfSpiky(mesh, part.shape, material);
 
       if (isFlexible && segmentMeshes.length > 0) {
         const bodyY = bodyPart?.position[1] ?? 0.45;
@@ -796,7 +1035,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       outlineMeshRef.current = null;
     }
 
-  }, [parts, face, selectedPartId, isFlexible, segmentCount, segmentSpacing, connectorType]);
+  }, [parts, face, selectedPartId, isFlexible, segmentCount, segmentSpacing, connectorType, fdmEnabled, fdmDensity, filamentStyle]);
 
   return (
     <div

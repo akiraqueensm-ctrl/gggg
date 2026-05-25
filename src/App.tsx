@@ -43,6 +43,11 @@ export default function App() {
   const [wiggleSpeed, setWiggleSpeed] = useState<number>(2.0);
   const [wiggleAmplitude, setWiggleAmplitude] = useState<number>(0.16);
 
+  // FDM 3D Layer printer simulation & Filament properties
+  const [fdmEnabled, setFdmEnabled] = useState<boolean>(true);
+  const [fdmDensity, setFdmDensity] = useState<number>(180);
+  const [filamentStyle, setFilamentStyle] = useState<'matte' | 'silk_standard' | 'silk_dual' | 'silk_rainbow'>('silk_standard');
+
   // Load a new preset helper with defaults
   const handleLoadPreset = (presetId: string) => {
     const preset = ANIMAL_PRESETS.find((p) => p.id === presetId);
@@ -264,6 +269,9 @@ export default function App() {
               connectorType={connectorType}
               wiggleSpeed={wiggleSpeed}
               wiggleAmplitude={wiggleAmplitude}
+              fdmEnabled={fdmEnabled}
+              fdmDensity={fdmDensity}
+              filamentStyle={filamentStyle}
             />
 
             {/* Floating Dual Actions Menu with both Random and Infinite generator options */}
@@ -321,6 +329,14 @@ export default function App() {
           setWiggleSpeed={setWiggleSpeed}
           wiggleAmplitude={wiggleAmplitude}
           setWiggleAmplitude={setWiggleAmplitude}
+
+          // New FDM / Filament properties
+          fdmEnabled={fdmEnabled}
+          setFdmEnabled={setFdmEnabled}
+          fdmDensity={fdmDensity}
+          setFdmDensity={setFdmDensity}
+          filamentStyle={filamentStyle}
+          setFilamentStyle={setFilamentStyle}
         />
 
       </main>
