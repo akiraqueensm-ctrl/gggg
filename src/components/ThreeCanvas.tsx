@@ -20,12 +20,13 @@ interface ThreeCanvasProps {
   isFlexible?: boolean;
   segmentCount?: number;
   segmentSpacing?: number;
-  connectorType?: 'ring' | 'ball' | 'flexible';
+  connectorType?: 'ring' | 'ball' | 'flexible' | 'chain' | 'hinge' | 'spine';
   wiggleSpeed?: number;
   wiggleAmplitude?: number;
   fdmEnabled?: boolean;
   fdmDensity?: number;
   filamentStyle?: 'matte' | 'silk_standard' | 'silk_dual' | 'silk_rainbow';
+  legCount?: number;
 }
 
 export interface ThreeCanvasHandle {
@@ -49,6 +50,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
   fdmEnabled = false,
   fdmDensity = 150,
   filamentStyle = 'silk_standard',
+  legCount = 4,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -504,9 +506,12 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
 
     // Apply custom sculpt / sculpture deformations on vertex coordinates directly
     const applySculptDeformation = (geometry: THREE.BufferGeometry, part: Part) => {
-      if (!part.sculpt) return;
-      const { pinch = 0, taper = 0, flatten = 0, ridges = 0, noise = 0 } = part.sculpt;
-      if (pinch === 0 && taper === 0 && flatten === 0 && ridges === 0 && noise === 0) return;
+      const sculptObj = part.sculpt || {};
+      const { pinch = 0, taper = 0, flatten = 0, ridges = 0, noise = 0 } = sculptObj;
+      const earBend = part.earBend ?? 0;
+      const earFold = part.earFold ?? 0;
+
+      if (pinch === 0 && taper === 0 && flatten === 0 && ridges === 0 && noise === 0 && earBend === 0 && earFold === 0) return;
 
       const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
       if (!posAttr) return;
@@ -591,6 +596,22 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
           z += (dirZ / len) * displace;
         }
 
+        // 6. ORGANIC EAR BEND (Forward/Backward parabolic curve)
+        if (earBend !== 0) {
+          const relativeY = size.y > 0 ? (y - bbox.min.y) / size.y : 0;
+          // Curve in Z direction
+          z += Math.pow(relativeY, 2) * earBend * size.y * 0.55;
+        }
+
+        // 7. ORGANIC EAR CUPPING/FOLD (Curve edges inward/outward)
+        if (earFold !== 0) {
+          const relativeX = size.x > 0 ? (x - center.x) / (size.x * 0.5) : 0;
+          const relativeY = size.y > 0 ? (y - bbox.min.y) / size.y : 0;
+          // More cupping/folding towards the top half of the ear
+          const heightMultiplier = Math.pow(relativeY, 0.5); // ranges 0 to 1
+          z += (1.0 - relativeX * relativeX) * earFold * size.x * 0.45 * heightMultiplier;
+        }
+
         posAttr.setXYZ(i, x, y, z);
       }
 
@@ -629,6 +650,8 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
     // Store references of body parts to organize layout parenting easily
     const bodyPart = parts.find(p => p.id === 'body');
     const headPart = parts.find(p => p.id === 'head');
+
+    let headDeformedGeometry: THREE.BufferGeometry | null = null;
 
     // If structure is flexible, Segment 0 holds the main position, and we parent appendages elegantly!
     const segmentMeshes: THREE.Mesh[] = [];
@@ -734,6 +757,67 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
               flexibleMesh.rotation.set(Math.PI / 2, 0, 0); // turn horizontal
               segMesh.add(flexibleMesh);
             }
+            else if (connectorType === 'chain') {
+              // Intricate multi-link chain Drive (3 interlocking loops)
+              const chainR = linkRadius * 0.85;
+              const chainT = linkThickness * 0.9;
+              
+              const torus1 = new THREE.Mesh(new THREE.TorusGeometry(chainR, chainT, 10, 20), linkMaterial);
+              torus1.position.set(0, 0, -segmentSpacing * 0.3);
+              segMesh.add(torus1);
+
+              const torus2 = new THREE.Mesh(new THREE.TorusGeometry(chainR * 1.05, chainT, 10, 20), linkMaterial);
+              torus2.position.set(0, 0, -segmentSpacing * 0.5);
+              torus2.rotation.set(Math.PI / 2, 0, 0);
+              segMesh.add(torus2);
+
+              const torus3 = new THREE.Mesh(new THREE.TorusGeometry(chainR, chainT, 10, 20), linkMaterial);
+              torus3.position.set(0, 0, -segmentSpacing * 0.7);
+              segMesh.add(torus3);
+            }
+            else if (connectorType === 'hinge') {
+              // Mechanical industrial hinge style (Pivot cylinder + clamp)
+              const pinGeo = new THREE.CylinderGeometry(linkThickness * 1.6, linkThickness * 1.6, linkRadius * 2.2, 16);
+              const pinMesh = new THREE.Mesh(pinGeo, linkMaterial);
+              pinMesh.position.set(0, 0, -segmentSpacing * 0.5);
+              pinMesh.rotation.set(0, 0, Math.PI / 2); // horizontal pivot pin
+              segMesh.add(pinMesh);
+
+              const sleeveGeo = new THREE.TorusGeometry(linkRadius * 0.9, linkThickness * 1.3, 10, 20);
+              const sleeveL = new THREE.Mesh(sleeveGeo, linkMaterial);
+              sleeveL.position.set(-linkRadius * 0.6, 0, -segmentSpacing * 0.5);
+              segMesh.add(sleeveL);
+
+              const sleeveR = new THREE.Mesh(sleeveGeo, linkMaterial);
+              sleeveR.position.set(linkRadius * 0.6, 0, -segmentSpacing * 0.5);
+              segMesh.add(sleeveR);
+            }
+            else if (connectorType === 'spine') {
+              // Dinosaur / Dragon bio-mechanical bone vertebra
+              const boneGeo = new THREE.SphereGeometry(linkRadius * 1.1, 12, 12);
+              const boneMesh = new THREE.Mesh(boneGeo, linkMaterial);
+              boneMesh.position.set(0, 0, -segmentSpacing * 0.5);
+              segMesh.add(boneMesh);
+
+              // Top pointed scale/bone process spike
+              const spikeGeo = new THREE.ConeGeometry(linkRadius * 0.6, linkRadius * 1.8, 4);
+              const spikeMesh = new THREE.Mesh(spikeGeo, linkMaterial);
+              spikeMesh.position.set(0, linkRadius * 0.8, -segmentSpacing * 0.5);
+              spikeMesh.rotation.set(-Math.PI / 6, 0, 0); // point backward slightly
+              segMesh.add(spikeMesh);
+
+              // Lateral tiny spike bones
+              const smallSpikeGeo = new THREE.ConeGeometry(linkRadius * 0.3, linkRadius * 0.9, 4);
+              const leftSpike = new THREE.Mesh(smallSpikeGeo, linkMaterial);
+              leftSpike.position.set(-linkRadius * 0.8, 0, -segmentSpacing * 0.5);
+              leftSpike.rotation.set(0, 0, Math.PI / 3);
+              segMesh.add(leftSpike);
+
+              const rightSpike = new THREE.Mesh(smallSpikeGeo, linkMaterial);
+              rightSpike.position.set(linkRadius * 0.8, 0, -segmentSpacing * 0.5);
+              rightSpike.rotation.set(0, 0, -Math.PI / 3);
+              segMesh.add(rightSpike);
+            }
           }
 
           animalGroup.add(segMesh);
@@ -745,6 +829,9 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       // EXCEPTION: reposition limbs & tails to correct parents if flexible structure is active
       const geometry = getGeometry(part.shape);
       applySculptDeformation(geometry, part);
+      if (part.id === 'head') {
+        headDeformedGeometry = geometry;
+      }
       const material = getMaterialForPart(part.color, part.roughness ?? 0.8, part.metalness ?? 0.15);
 
       const mesh = new THREE.Mesh(geometry, material);
@@ -801,14 +888,13 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
           const attachmentIdx = Math.max(1, segmentCount - 2);
           const parentSegMesh = segmentMeshes[attachmentIdx];
           
-          const sideFactor = part.id === 'leg_l' ? -1 : 1;
           const scaleFactorAtAttachment = Math.max(0.24, 1.0 - (attachmentIdx / (segmentCount - 1)) * 0.62);
 
-          // Local coordinate offsets
+          // Local coordinate offsets (using part positions organically to allow full movement!)
           mesh.position.set(
             part.position[0],
-            -0.3, // keep on ground relative to body segment center
-            0
+            part.position[1] - 0.35,
+            part.position[2]
           );
 
           mesh.scale.set(
@@ -824,11 +910,37 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
           );
 
           parentSegMesh.add(mesh);
+
+          // If 6 legs requested, clone this leg and attach to middle segment!
+          if (legCount === 6) {
+            const midAttachmentIdx = Math.max(1, Math.floor((segmentCount - 1) * 0.45));
+            const finalMidIdx = (midAttachmentIdx >= attachmentIdx) ? Math.max(1, attachmentIdx - 1) : midAttachmentIdx;
+            
+            const midSegMesh = segmentMeshes[finalMidIdx];
+            const midScaleFactor = Math.max(0.24, 1.0 - (finalMidIdx / (segmentCount - 1)) * 0.62);
+
+            const midMesh = mesh.clone() as THREE.Mesh;
+            midMesh.name = part.name + "_mid";
+            
+            midMesh.scale.set(
+              part.scale[0] / midScaleFactor,
+              part.scale[1] / midScaleFactor,
+              part.scale[2] / midScaleFactor
+            );
+            
+            midSegMesh.add(midMesh);
+          }
         }
         else if (part.id === 'arm_l' || part.id === 'arm_r') {
+          if (legCount < 4) return; // Hide front legs if 2 legs selected
+          
           // Front legs attach as children of Segment 0
           const seg0Mesh = segmentMeshes[0];
-          mesh.position.set(part.position[0], 0, 0.1);
+          mesh.position.set(
+            part.position[0],
+            part.position[1] - 0.35,
+            part.position[2] + 0.1
+          );
           mesh.scale.set(part.scale[0], part.scale[1], part.scale[2]);
           mesh.rotation.set(
             THREE.MathUtils.degToRad(part.rotation[0]),
@@ -850,6 +962,10 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         }
       } else {
         // Standard non-flexible model loading
+        if ((part.id === 'arm_l' || part.id === 'arm_r') && legCount < 4) {
+          return; // Skip front legs if 2 legs selected
+        }
+
         mesh.position.set(part.position[0], part.position[1], part.position[2]);
         mesh.scale.set(part.scale[0], part.scale[1], part.scale[2]);
         mesh.rotation.set(
@@ -858,8 +974,82 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
           THREE.MathUtils.degToRad(part.rotation[2])
         );
         animalGroup.add(mesh);
+
+        // Render middle legs if 6 legs requested
+        if ((part.id === 'leg_l' || part.id === 'leg_r') && legCount === 6) {
+          const companionArmId = part.id === 'leg_l' ? 'arm_l' : 'arm_r';
+          const armPart = parts.find(p => p.id === companionArmId);
+          if (armPart) {
+            const midMesh = mesh.clone() as THREE.Mesh;
+            midMesh.name = part.name + "_mid";
+            
+            // Average Z, Y, X coordinates between rear and front legs
+            const midX = (part.position[0] + armPart.position[0]) / 2;
+            const midY = (part.position[1] + armPart.position[1]) / 2;
+            const midZ = (part.position[2] + armPart.position[2]) / 2;
+            midMesh.position.set(midX, midY, midZ);
+            
+            // Average rotational tilt
+            const rotX = (part.rotation[0] + armPart.rotation[0]) / 2;
+            const rotY = (part.rotation[1] + armPart.rotation[1]) / 2;
+            const rotZ = (part.rotation[2] + armPart.rotation[2]) / 2;
+            midMesh.rotation.set(
+              THREE.MathUtils.degToRad(rotX),
+              THREE.MathUtils.degToRad(rotY),
+              THREE.MathUtils.degToRad(rotZ)
+            );
+            
+            animalGroup.add(midMesh);
+          }
+        }
       }
     });
+
+    // Helper: Dynamic contour projection to align features directly on head surface
+    const getHeadSurfaceZ = (localX: number, localY: number, geometry: THREE.BufferGeometry | null): number => {
+      const r = 0.5;
+      const x2 = localX * localX;
+      const y2 = localY * localY;
+      let defaultZ = 0.44; // fallback standard sphere depth
+      if (x2 + y2 < r * r) {
+        defaultZ = Math.sqrt(r * r - x2 - y2);
+      } else {
+        defaultZ = 0.1;
+      }
+
+      if (!geometry) return defaultZ;
+
+      const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+      if (!posAttr) return defaultZ;
+
+      let closestZ = defaultZ;
+      let minDistanceSq = Infinity;
+      
+      for (let i = 0; i < posAttr.count; i++) {
+        const vx = posAttr.getX(i);
+        const vy = posAttr.getY(i);
+        const vz = posAttr.getZ(i);
+
+        // Focus purely on front-facing coordinates
+        if (vz <= 0.05) continue;
+
+        const dx = vx - localX;
+        const dy = vy - localY;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < minDistanceSq) {
+          minDistanceSq = distSq;
+          closestZ = vz;
+        }
+      }
+
+      // If a close vertex is matched, use its exact sculpted/deformed coordinate
+      if (minDistanceSq < 0.06) {
+        return closestZ;
+      }
+
+      return defaultZ;
+    };
 
     // RENDER FACE DETAILS INSIDE HEAD MESH CONTAINER
     if (headPart && headPart.visible) {
@@ -904,44 +1094,62 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
 
       const eyeDistanceX = 0.22 * face.eyeSpacing;
       const eyeHeightY = 0.08 * face.eyeHeight;
-      const faceZOffset = 0.44;
+      const eyeSizeMultiplier = face.eyeSize ?? 1.0;
+      const eyeRotDeg = face.eyeRotation ?? 0;
 
       const createEyeball = (isLeft: boolean) => {
         const sideMult = isLeft ? -1 : 1;
         const eyeGroup = new THREE.Group();
         eyeGroup.name = isLeft ? 'LeftEye' : 'RightEye';
-        eyeGroup.position.set(eyeDistanceX * sideMult, eyeHeightY, faceZOffset - 0.02);
+
+        const targetLocalX = eyeDistanceX * sideMult;
+        const targetLocalY = eyeHeightY;
+        const headSurfaceZ = getHeadSurfaceZ(targetLocalX, targetLocalY, headDeformedGeometry);
+        const eyeballZ = headSurfaceZ * (face.eyeDepth ?? 1.0);
+
+        // Position on surface
+        eyeGroup.position.set(targetLocalX, targetLocalY, eyeballZ - 0.012);
+
+        // Advanced Normal-based alignment so eyeballs perfectly mold around head curvature
+        const normal = new THREE.Vector3(targetLocalX, targetLocalY, headSurfaceZ).normalize();
+        const alignQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+        eyeGroup.quaternion.copy(alignQuat);
+
+        // Add additional eye tilt degree
+        const tiltZ = THREE.MathUtils.degToRad(eyeRotDeg) * sideMult;
+        const tiltQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), tiltZ);
+        eyeGroup.quaternion.multiply(tiltQuat);
 
         if (face.eyeStyle === 'classic' || face.eyeStyle === 'anime') {
-          const size = face.eyeStyle === 'anime' ? 0.09 : 0.065;
+          const baseSize = face.eyeStyle === 'anime' ? 0.09 : 0.065;
+          const size = baseSize * eyeSizeMultiplier;
           const eyeGeo = new THREE.SphereGeometry(size, 16, 16);
           const eyeMesh = new THREE.Mesh(eyeGeo, eyeMat);
           eyeMesh.scale.set(1, face.eyeStyle === 'anime' ? 1.3 : 1, 0.75);
           eyeGroup.add(eyeMesh);
 
           const shine1 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.35, 12, 12), shineMat);
-          shine1.position.set(size * 0.35, size * 0.35, size * 0.65);
+          shine1.position.set(size * 0.25, size * 0.25, size * 0.72);
           eyeGroup.add(shine1);
 
           if (face.eyeStyle === 'anime') {
-            const shine2 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.2, 12, 12), shineMat);
-            shine2.position.set(-size * 0.25, -size * 0.3, size * 0.65);
+            const shine2 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.18, 12, 12), shineMat);
+            shine2.position.set(-size * 0.25, -size * 0.25, size * 0.72);
             eyeGroup.add(shine2);
           }
         } 
         else if (face.eyeStyle === 'happy') {
-          const arcGeo = new THREE.TorusGeometry(0.06, 0.015, 8, 24, Math.PI);
+          const arcGeo = new THREE.TorusGeometry(0.06 * eyeSizeMultiplier, 0.015 * eyeSizeMultiplier, 8, 24, Math.PI);
           const arcMesh = new THREE.Mesh(arcGeo, eyeMat);
-          arcMesh.rotation.set(0, 0, Math.PI);
           eyeGroup.add(arcMesh);
         } 
         else if (face.eyeStyle === 'sleepy') {
-          const barGeo = new THREE.BoxGeometry(0.12, 0.02, 0.02);
+          const barGeo = new THREE.BoxGeometry(0.12 * eyeSizeMultiplier, 0.02 * eyeSizeMultiplier, 0.02);
           const barMesh = new THREE.Mesh(barGeo, eyeMat);
           eyeGroup.add(barMesh);
         } 
         else if (face.eyeStyle === 'blinking') {
-          const arcGeo = new THREE.TorusGeometry(0.06, 0.015, 8, 24, Math.PI);
+          const arcGeo = new THREE.TorusGeometry(0.06 * eyeSizeMultiplier, 0.015 * eyeSizeMultiplier, 8, 24, Math.PI);
           const arcMesh = new THREE.Mesh(arcGeo, eyeMat);
           eyeGroup.add(arcMesh);
         }
@@ -954,22 +1162,56 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
 
       if (face.hasCheeks) {
         const cheekSize = 0.08;
+        const cheekX = eyeDistanceX + 0.06;
+        const cheekY = eyeHeightY - 0.12;
+
+        const leftCheekZ = getHeadSurfaceZ(-cheekX, cheekY, headDeformedGeometry) * (face.eyeDepth ?? 1.0);
         const leftCheek = new THREE.Mesh(new THREE.SphereGeometry(cheekSize, 16, 12), cheekMat);
         leftCheek.name = 'LeftCheekBlush';
-        leftCheek.position.set(-eyeDistanceX - 0.06, eyeHeightY - 0.12, faceZOffset - 0.06);
+        leftCheek.position.set(-cheekX, cheekY, leftCheekZ - 0.03);
         leftCheek.scale.set(1.4, 0.6, 0.4);
-        
-        const rightCheek = leftCheek.clone();
+
+        const rightCheekZ = getHeadSurfaceZ(cheekX, cheekY, headDeformedGeometry) * (face.eyeDepth ?? 1.0);
+        const rightCheek = new THREE.Mesh(new THREE.SphereGeometry(cheekSize, 16, 12), cheekMat);
         rightCheek.name = 'RightCheekBlush';
-        rightCheek.position.set(eyeDistanceX + 0.06, eyeHeightY - 0.12, faceZOffset - 0.06);
+        rightCheek.position.set(cheekX, cheekY, rightCheekZ - 0.03);
+        rightCheek.scale.set(1.4, 0.6, 0.4);
+
+        // Rotate cheeks outward with curvature
+        const lCheekNormal = new THREE.Vector3(-cheekX, cheekY, leftCheekZ).normalize();
+        const lCheekQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), lCheekNormal);
+        leftCheek.quaternion.copy(lCheekQuat);
+
+        const rCheekNormal = new THREE.Vector3(cheekX, cheekY, rightCheekZ).normalize();
+        const rCheekQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), rCheekNormal);
+        rightCheek.quaternion.copy(rCheekQuat);
 
         faceGroup.add(leftCheek);
         faceGroup.add(rightCheek);
       }
 
+      // DECOUPLED MOUTH COMPONENT WITH DETAILED CONTROLS
+      const baseMouthHeightRaw = face.mouthHeight !== undefined ? face.mouthHeight : 1.0;
+      const baseMouthSize = face.mouthSize !== undefined ? face.mouthSize : 1.0;
+      const mouthDepthMult = face.mouthDepth !== undefined ? face.mouthDepth : 1.0;
+
+      // Vertical coordinates are separate from eyeHeight: centered around standard kawaii placement
+      const mouthY = (eyeHeightY - 0.1) + (baseMouthHeightRaw - 1.0) * 0.25;
+
+      const mouthSurfaceZ = getHeadSurfaceZ(0, mouthY, headDeformedGeometry);
+      const mouthZ = mouthSurfaceZ * mouthDepthMult;
+
       const mouthGroup = new THREE.Group();
       mouthGroup.name = 'Mouth';
-      mouthGroup.position.set(0, eyeHeightY - 0.1, faceZOffset + 0.04);
+      mouthGroup.position.set(0, mouthY, mouthZ - 0.005);
+      
+      // Rotate outward perpendicular to head surface
+      const mouthNormal = new THREE.Vector3(0, mouthY, mouthSurfaceZ).normalize();
+      const mouthQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), mouthNormal);
+      mouthGroup.quaternion.copy(mouthQuat);
+
+      // Sizing control
+      mouthGroup.scale.set(baseMouthSize, baseMouthSize, baseMouthSize);
 
       if (face.mouthStyle === 'dot') {
         const dotGeo = new THREE.SphereGeometry(0.03, 12, 12);
@@ -1035,7 +1277,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       outlineMeshRef.current = null;
     }
 
-  }, [parts, face, selectedPartId, isFlexible, segmentCount, segmentSpacing, connectorType, fdmEnabled, fdmDensity, filamentStyle]);
+  }, [parts, face, selectedPartId, isFlexible, segmentCount, segmentSpacing, connectorType, fdmEnabled, fdmDensity, filamentStyle, legCount]);
 
   return (
     <div

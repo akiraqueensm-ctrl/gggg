@@ -42,6 +42,7 @@ export default function App() {
   const [connectorType, setConnectorType] = useState<'ring' | 'ball' | 'flexible'>('ring');
   const [wiggleSpeed, setWiggleSpeed] = useState<number>(2.0);
   const [wiggleAmplitude, setWiggleAmplitude] = useState<number>(0.16);
+  const [legCount, setLegCount] = useState<number>(4);
 
   // FDM 3D Layer printer simulation & Filament properties
   const [fdmEnabled, setFdmEnabled] = useState<boolean>(true);
@@ -272,6 +273,7 @@ export default function App() {
               fdmEnabled={fdmEnabled}
               fdmDensity={fdmDensity}
               filamentStyle={filamentStyle}
+              legCount={legCount}
             />
 
             {/* Floating Dual Actions Menu with both Random and Infinite generator options */}
@@ -315,6 +317,8 @@ export default function App() {
           showGrid={showGrid}
           setShowGrid={setShowGrid}
           onLoadPreset={handleLoadPreset}
+          legCount={legCount}
+          setLegCount={setLegCount}
           
           // Articulation parameters
           isFlexible={isFlexible}

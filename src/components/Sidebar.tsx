@@ -43,6 +43,9 @@ interface SidebarProps {
   setFdmDensity: (v: number) => void;
   filamentStyle: 'matte' | 'silk_standard' | 'silk_dual' | 'silk_rainbow';
   setFilamentStyle: (v: 'matte' | 'silk_standard' | 'silk_dual' | 'silk_rainbow') => void;
+
+  legCount?: number;
+  setLegCount?: (v: number) => void;
 }
 
 export function Sidebar({
@@ -79,6 +82,8 @@ export function Sidebar({
   setFdmDensity,
   filamentStyle,
   setFilamentStyle,
+  legCount = 4,
+  setLegCount,
 }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<'presets' | 'flexi' | 'face' | 'parts' | 'accessories' | 'scene'>('presets');
   const [syncSculptGlobally, setSyncSculptGlobally] = useState<boolean>(false);
@@ -285,28 +290,28 @@ export function Sidebar({
       className="w-full lg:w-96 flex flex-col bg-white dark:bg-zinc-950 border-t lg:border-t-0 lg:border-l border-slate-100 dark:border-zinc-900 overflow-hidden relative"
     >
       {/* Tab Selectors */}
-      <div className="flex border-b border-gray-100 dark:border-zinc-900 bg-gray-50/50 dark:bg-zinc-900/10 p-1.5 gap-1 overflow-x-auto scrollbar-none">
+      <div className="grid grid-cols-3 border-b border-gray-100 dark:border-zinc-900 bg-gray-50/50 dark:bg-zinc-900/10 p-1.5 gap-1.5 bg-zinc-50/80 dark:bg-zinc-900/40 select-none">
         {[
-          { id: 'presets', label: 'Plantillas', icon: Sparkles },
-          { id: 'flexi', label: 'Articulado 🧬', icon: Activity },
+          { id: 'presets', label: 'Modelos', icon: Sparkles },
+          { id: 'flexi', label: 'Flexi', icon: Activity },
           { id: 'face', label: 'Rostro', icon: Smile },
-          { id: 'parts', label: 'Editar 3D', icon: Sliders },
-          { id: 'accessories', label: 'Deco', icon: Plus },
-          { id: 'scene', label: 'Escena', icon: Settings },
+          { id: 'parts', label: 'Esculpir', icon: Sliders },
+          { id: 'accessories', label: 'Decora', icon: Plus },
+          { id: 'scene', label: 'Estudio', icon: Settings },
         ].map((tab) => {
           const IconObj = tab.icon;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex-1 min-w-[70px] flex flex-col items-center justify-center py-2 px-1 rounded-xl text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+              className={`flex flex-col items-center justify-center py-1 px-0.5 rounded-lg text-[9px] font-semibold transition-all duration-200 cursor-pointer ${
                 activeTab === tab.id
-                  ? 'bg-pink-500/10 dark:bg-pink-500/20 text-pink-600 dark:text-pink-400 font-semibold border-b-2 border-pink-500'
+                  ? 'bg-pink-500/10 dark:bg-pink-500/20 text-pink-600 dark:text-pink-400 border border-pink-500/20 shadow-sm shadow-pink-500/5'
                   : 'text-slate-550 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50/50 dark:hover:bg-zinc-900/30'
               }`}
             >
               <IconObj className="w-3.5 h-3.5 mb-0.5" />
-              <span>{tab.label}</span>
+              <span className="truncate max-w-full">{tab.label}</span>
             </button>
           );
         })}
@@ -381,6 +386,35 @@ export function Sidebar({
               )}
             </div>
 
+            {/* Leg Count selection */}
+            <div className="p-4 bg-slate-50/70 dark:bg-zinc-900/40 border border-slate-100 dark:border-zinc-850 rounded-[24px]/90 space-y-3">
+              <div>
+                <div className="text-xs font-bold text-gray-700 dark:text-gray-200">🐾 Número de Patas / Extremidades</div>
+                <div className="text-[10px] text-gray-400">Selecciona entre configuraciones bípedas, de 4 patas o multi-extremidades</div>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 bg-slate-100 dark:bg-zinc-805 p-1 rounded-xl">
+                {[
+                  { id: 2, label: 'Bípedo 🦉', desc: '2 Patas' },
+                  { id: 4, label: 'Cuadrúpedo 🦌', desc: '4 Patas' },
+                  { id: 6, label: 'Hexápodo 🐛', desc: '6 Patas' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setLegCount && setLegCount(item.id)}
+                    className={`py-2 px-0.5 text-[9px] rounded-lg border text-center transition-all cursor-pointer ${
+                      legCount === item.id
+                        ? 'bg-pink-500 border-pink-500 text-white font-bold'
+                        : 'bg-transparent border-transparent text-slate-600 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    <div className="font-bold truncate">{item.label}</div>
+                    <div className={`text-[7px] uppercase tracking-wide opacity-80 truncate ${legCount === item.id ? 'text-pink-100' : 'text-gray-400'}`}>{item.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {isFlexible ? (
               <div className="space-y-4">
                 
@@ -432,20 +466,23 @@ export function Sidebar({
                     {[
                       { id: 'ring', label: 'Eslabón 🥨', desc: 'Real Chain' },
                       { id: 'ball', label: 'Rótula ⚽', desc: 'Ball Joint' },
-                      { id: 'flexible', label: 'Goma 🩹', desc: 'Rubber Bellow' },
+                      { id: 'flexible', label: 'Goma 🩹', desc: 'Rubber' },
+                      { id: 'chain', label: 'Cadena ⛓️', desc: 'Lock Chain' },
+                      { id: 'hinge', label: 'Bisagra 🚪', desc: 'Hinge Pin' },
+                      { id: 'spine', label: 'Espina 🦴', desc: 'Vertebrae' },
                     ].map((type) => (
                       <button
                         key={type.id}
                         type="button"
                         onClick={() => setConnectorType(type.id as any)}
-                        className={`py-2 px-1 text-[10px] rounded-lg border text-center transition-all cursor-pointer ${
+                        className={`py-2 px-0.5 text-[9px] rounded-lg border text-center transition-all cursor-pointer ${
                           connectorType === type.id
                             ? 'bg-pink-500 border-pink-500 text-white font-bold'
                             : 'bg-transparent border-transparent text-slate-600 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-zinc-800'
                         }`}
                       >
-                        <div>{type.label}</div>
-                        <div className={`text-[7px] uppercase tracking-wide opacity-80 ${connectorType === type.id ? 'text-pink-100' : 'text-gray-400'}`}>{type.desc}</div>
+                        <div className="font-bold truncate">{type.label}</div>
+                        <div className={`text-[7px] uppercase tracking-wide opacity-80 truncate ${connectorType === type.id ? 'text-pink-100' : 'text-gray-400'}`}>{type.desc}</div>
                       </button>
                     ))}
                   </div>
@@ -609,7 +646,7 @@ export function Sidebar({
               {/* Eye height slider */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-gray-500 dark:text-gray-400">Altura de los Ojos</span>
+                  <span className="text-gray-550 dark:text-gray-400">Altura de los Ojos</span>
                   <span className="font-mono text-gray-700 dark:text-gray-300">{face.eyeHeight.toFixed(1)}</span>
                 </div>
                 <input
@@ -619,6 +656,57 @@ export function Sidebar({
                   step="0.1"
                   value={face.eyeHeight}
                   onChange={(e) => setFace(f => ({ ...f, eyeHeight: parseFloat(e.target.value) }))}
+                  className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+
+              {/* Eye size slider */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-550 dark:text-gray-400">Tamaño de los Ojos</span>
+                  <span className="font-mono text-gray-700 dark:text-gray-300">{(face.eyeSize ?? 1.0).toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.4"
+                  max="2.5"
+                  step="0.05"
+                  value={face.eyeSize ?? 1.0}
+                  onChange={(e) => setFace(f => ({ ...f, eyeSize: parseFloat(e.target.value) }))}
+                  className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+
+              {/* Eye rotation/tilt slider */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-550 dark:text-gray-400">Inclinación de Ojos (Tilt)</span>
+                  <span className="font-mono text-gray-700 dark:text-gray-300">{(face.eyeRotation ?? 0)}°</span>
+                </div>
+                <input
+                  type="range"
+                  min="-45"
+                  max="45"
+                  step="1"
+                  value={face.eyeRotation ?? 0}
+                  onChange={(e) => setFace(f => ({ ...f, eyeRotation: parseInt(e.target.value) }))}
+                  className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+
+              {/* Eye depth slider */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-550 dark:text-gray-400">Profundidad / Hundimiento (3D Depth)</span>
+                  <span className="font-mono text-gray-700 dark:text-gray-300">{(face.eyeDepth ?? 1.0).toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.4"
+                  max="1.8"
+                  step="0.05"
+                  value={face.eyeDepth ?? 1.0}
+                  onChange={(e) => setFace(f => ({ ...f, eyeDepth: parseFloat(e.target.value) }))}
                   className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                 />
               </div>
@@ -652,6 +740,76 @@ export function Sidebar({
                 </div>
               </div>
 
+              {/* Separate Mouth Controls Section */}
+              <div className="pt-4 border-t border-gray-150 dark:border-zinc-905 space-y-4">
+                <div className="text-[11px] font-bold text-gray-700 dark:text-gray-400 uppercase tracking-wider">👄 Controles de Boca Separados</div>
+                
+                {/* Mouth height slider */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-550 dark:text-gray-400">Altura de la Boca (Mouth Y)</span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300">{(face.mouthHeight ?? 1.0).toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="2.5"
+                    step="0.05"
+                    value={face.mouthHeight ?? 1.0}
+                    onChange={(e) => setFace(f => ({ ...f, mouthHeight: parseFloat(e.target.value) }))}
+                    className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                {/* Mouth size slider */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-550 dark:text-gray-400">Tamaño de la Boca (Scale)</span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300">{(face.mouthSize ?? 1.0).toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.4"
+                    max="2.5"
+                    step="0.05"
+                    value={face.mouthSize ?? 1.0}
+                    onChange={(e) => setFace(f => ({ ...f, mouthSize: parseFloat(e.target.value) }))}
+                    className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                {/* Mouth depth / contour fit slider */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-550 dark:text-gray-400">Profundidad / Ajuste 3D (Z-Depth)</span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300">{(face.mouthDepth ?? 1.0).toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.4"
+                    max="1.8"
+                    step="0.05"
+                    value={face.mouthDepth ?? 1.0}
+                    onChange={(e) => setFace(f => ({ ...f, mouthDepth: parseFloat(e.target.value) }))}
+                    className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                {/* Mouth Color Picker */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Color de la Boca</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={face.mouthColor}
+                      onChange={(e) => setFace(f => ({ ...f, mouthColor: e.target.value }))}
+                      className="w-8 h-8 rounded-lg cursor-pointer border-0 p-0"
+                    />
+                    <span className="text-[10px] font-mono uppercase text-gray-500">{face.mouthColor}</span>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         )}
@@ -679,6 +837,72 @@ export function Sidebar({
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Gestor de Capas / List of layers */}
+            <div className="p-3 bg-slate-50/50 dark:bg-zinc-900/40 rounded-2xl border border-slate-150/70 dark:border-zinc-900 space-y-2">
+              <span className="text-[10px] font-extrabold text-slate-505 dark:text-gray-400 uppercase tracking-wider block">
+                🥞 Lista de Partes & Capas Activas
+              </span>
+              <div className="max-h-[140px] overflow-y-auto space-y-1 pr-1 scrollbar-none">
+                {parts.map((p) => {
+                  const isMain = p.id === 'body' || p.id === 'head';
+                  const isSelected = selectedPartId === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      className={`flex items-center justify-between p-1.5 rounded-xl border text-[11px] transition-all ${
+                        isSelected
+                          ? 'bg-pink-500/10 border-pink-500/30 text-pink-700 dark:text-pink-400 font-semibold'
+                          : 'bg-white dark:bg-zinc-900 border-slate-100 dark:border-zinc-850 text-slate-650 dark:text-gray-300 hover:bg-slate-100/50 dark:hover:bg-zinc-800/40'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPartId(p.id)}
+                        className="flex-1 text-left flex items-center gap-1.5 truncate cursor-pointer pointer-events-auto"
+                      >
+                        <span className="text-sm">
+                          {p.id.includes('tail') || p.name.includes('Cola') ? '🦊' : p.id.includes('leg') || p.id.includes('arm') || p.name.includes('Patas') || p.name.includes('Garras') ? '🐾' : p.id === 'head' ? '🐱' : p.id === 'body' ? '🧸' : '✨'}
+                        </span>
+                        <span className="truncate">{p.name}</span>
+                      </button>
+                      
+                      <div className="flex items-center gap-1">
+                        {/* Visibility toggle */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            updatePartProperty(p.id, { visible: !p.visible });
+                          }}
+                          className={`p-1 rounded hover:bg-slate-205 dark:hover:bg-zinc-800 cursor-pointer pointer-events-auto transition-colors ${
+                            p.visible ? 'text-pink-500' : 'text-gray-305 dark:text-gray-600'
+                          }`}
+                          title="Ocultar/Mostrar"
+                        >
+                          {p.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                        </button>
+
+                        {/* Delete button (except for body/head) */}
+                        {!isMain && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeletePart(p.id);
+                            }}
+                            className="p-1 rounded hover:bg-red-500/10 text-red-400 hover:text-red-500 cursor-pointer pointer-events-auto transition-colors"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Auto-align & Head Linkage helper */}
@@ -988,6 +1212,58 @@ export function Sidebar({
                       className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
                     />
                   </div>
+
+                  {/* Slider: Ear Bend (Curvar/Doblar Orejas) */}
+                  <div className="space-y-1 pt-2.5 border-t border-dashed border-slate-150 dark:border-zinc-800">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-550 dark:text-gray-305 font-bold flex items-center gap-1">👂 Doblar Orejas (Ear Bend)</span>
+                      <span className="font-mono text-pink-655 dark:text-pink-400 font-bold">{(selectedPart.earBend ?? 0).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-1.2"
+                      max="1.2"
+                      step="0.05"
+                      value={selectedPart.earBend ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        updatePartProperty(selectedPart.id, {
+                          earBend: val
+                        });
+                      }}
+                      className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-gray-405">
+                      <span>◄ Atrás (Puntudas)</span>
+                      <span>Adelante / Caídas (Lop) ►</span>
+                    </div>
+                  </div>
+
+                  {/* Slider: Ear Fold (Ahondar / Plegado Orgánico) */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-gray-550 dark:text-gray-305 font-bold flex items-center gap-1">🥣 Copa Orgánica (Ear Fold)</span>
+                      <span className="font-mono text-pink-655 dark:text-pink-400 font-bold">{(selectedPart.earFold ?? 0).toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="-1.0"
+                      max="1.0"
+                      step="0.05"
+                      value={selectedPart.earFold ?? 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        updatePartProperty(selectedPart.id, {
+                          earFold: val
+                        });
+                      }}
+                      className="w-full h-1 accent-pink-550 bg-gray-200 dark:bg-zinc-805 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-gray-405">
+                      <span>◄ Plano/Abierto</span>
+                      <span>Cerrado / Cóncavo ►</span>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Position X */}
@@ -1157,35 +1433,136 @@ export function Sidebar({
         )}
 
         {/* TAB 5: ACCESSORIES & DECO */}
-        {activeTab === 'accessories' && (
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">Añadir Accesorios</h3>
-              <p className="text-xs text-gray-400 dark:text-gray-550">Personaliza tu creación con lindos sombreros, lazos, alas, ¡y coronas!</p>
-            </div>
+        {activeTab === 'accessories' && (() => {
+          // Define helper for emojis
+          const getEmojiForAccessory = (name: string) => {
+            if (name.includes('Sombrero')) return '🎩';
+            if (name.includes('Lazo')) return '🎀';
+            if (name.includes('Corona')) return '👑';
+            if (name.includes('Alas de Ángel') || name.includes('Alas de Angel')) return '👼';
+            if (name.includes('Alas de Murciélago')) return '🦇';
+            if (name.includes('Cuernos')) return '😈';
+            if (name.includes('Corazón')) return '💖';
+            if (name.includes('Gafas')) return '👓';
+            if (name.includes('Zorro')) return '🦊';
+            if (name.includes('Dino')) return '🦖';
+            if (name.includes('Pug')) return '🐕';
+            if (name.includes('Sirena')) return '🧜‍♀️';
+            if (name.includes('Diablito')) return '👹';
+            if (name.includes('Garras')) return '🐾';
+            if (name.includes('Patas de Patito')) return '🦆';
+            if (name.includes('Patas de Oso')) return '🐻';
+            if (name.includes('Patas de Robot')) return '🤖';
+            if (name.includes('Pezuñas')) return '🐗';
+            if (name.includes('Tiburón')) return '🦈';
+            if (name.includes('Ardilla')) return '🐿️';
+            if (name.includes('Castor')) return '🦫';
+            if (name.includes('Escorpión') || name.includes('Escorpi')) return '🦂';
+            if (name.includes('Aletas')) return '🐬';
+            if (name.includes('Escamas')) return '🐉';
+            if (name.includes('Erizo') || name.includes('Espinas')) return '🦔';
+            if (name.includes('Placa') || name.includes('Estego')) return '🦕';
+            return '✨';
+          };
 
-            <div className="space-y-2 bg-slate-50/20 p-1.5 rounded-3xl">
-              {ACCESSORY_TEMPLATES.map((acc, index) => (
-                <button
-                  key={index}
-                  onClick={() => handleAddAccessory(acc)}
-                  className="w-full pointer-events-auto cursor-pointer flex items-center justify-between p-3 bg-slate-50 dark:bg-zinc-900 border border-slate-150/60 dark:border-zinc-800 hover:border-pink-300/40 hover:bg-pink-50/10 rounded-[20px] transition-all group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 flex items-center justify-center rounded-lg bg-pink-500/10 dark:bg-pink-500/20 text-pink-600 dark:text-pink-400 font-bold text-base">
-                      {acc.name.includes('Sombrero') ? '🎩' : acc.name.includes('Lazo') ? '🎀' : acc.name.includes('Corona') ? '👑' : acc.name.includes('Alas') ? '👼' : acc.name.includes('Cuernos') ? '😈' : acc.name.includes('Corazón') ? '💖' : '👓'}
-                    </div>
-                    <div className="text-left">
-                      <div className="text-xs font-semibold text-slate-705 dark:text-gray-300 group-hover:text-pink-600 dark:group-hover:text-pink-400">{acc.name}</div>
-                      <div className="text-[9px] text-gray-400 dark:text-gray-555">Añadir al visor 3D</div>
+          // Define categorized lists
+          const groups = [
+            {
+              title: 'Adornos de Cabeza & Rostro 👑',
+              bgGrad: 'from-amber-500/5 to-yellow-500/5 dark:from-amber-500/10 dark:to-yellow-500/10',
+              borderCol: 'border-amber-500/10 dark:border-amber-400/20',
+              textCol: 'text-amber-600 dark:text-amber-400',
+              items: ACCESSORY_TEMPLATES.filter(acc => 
+                acc.name.includes('Sombrero') || 
+                acc.name.includes('Corona') || 
+                acc.name.includes('Lazo') || 
+                acc.name.includes('Gafas') || 
+                acc.name.includes('Corazón') ||
+                acc.name.includes('Cuernos')
+              )
+            },
+            {
+              title: 'Colas para Articular 🦊',
+              bgGrad: 'from-orange-500/5 to-red-500/5 dark:from-orange-500/10 dark:to-red-500/10',
+              borderCol: 'border-orange-500/10 dark:border-orange-400/20',
+              textCol: 'text-orange-600 dark:text-orange-400',
+              items: ACCESSORY_TEMPLATES.filter(acc => 
+                acc.name.toLowerCase().includes('cola') || 
+                acc.name.toLowerCase().includes('aguijón') || 
+                acc.name.toLowerCase().includes('aguijon')
+              )
+            },
+            {
+              title: 'Soportes & Patitas 🐾',
+              bgGrad: 'from-emerald-500/5 to-teal-500/5 dark:from-emerald-500/10 dark:to-teal-500/10',
+              borderCol: 'border-emerald-500/10 dark:border-emerald-400/20',
+              textCol: 'text-emerald-600 dark:text-emerald-400',
+              items: ACCESSORY_TEMPLATES.filter(acc => 
+                acc.name.includes('Garras') || 
+                acc.name.includes('Patas') || 
+                acc.name.includes('Pezuñas') ||
+                acc.name.includes('Aletas')
+              )
+            },
+            {
+              title: 'Alas, Escamas & Especiales ✨',
+              bgGrad: 'from-blue-500/5 to-indigo-500/5 dark:from-blue-500/10 dark:to-indigo-500/10',
+              borderCol: 'border-blue-500/10 dark:border-blue-400/20',
+              textCol: 'text-blue-600 dark:text-blue-400',
+              items: ACCESSORY_TEMPLATES.filter(acc => 
+                acc.name.includes('Alas') || 
+                acc.name.includes('Tiburón') ||
+                acc.name.includes('Escamas') ||
+                acc.name.includes('Erizo') ||
+                acc.name.includes('Placa')
+              )
+            }
+          ];
+
+          return (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">Añadir Detalles & Deco</h3>
+                <p className="text-xs text-gray-400 dark:text-gray-555">Suma colas, patitas, alas y sombreros. ¡Crea combinaciones únicas!</p>
+              </div>
+
+              <div className="space-y-5">
+                {groups.map((group) => (
+                  <div key={group.title} className="space-y-2">
+                    <span className={`text-[10px] font-extrabold uppercase tracking-wider ${group.textCol} px-1 flex items-center gap-1.5`}>
+                      {group.title}
+                    </span>
+                    <div className="grid grid-cols-1 gap-2">
+                      {group.items.map((acc, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => handleAddAccessory(acc)}
+                          className="w-full text-left pointer-events-auto cursor-pointer flex items-center justify-between p-2.5 bg-white dark:bg-zinc-900 border border-slate-150 dark:border-zinc-805 hover:border-pink-500 dark:hover:border-pink-500 rounded-2xl transition-all group shadow-sm hover:shadow-md"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 flex items-center justify-center rounded-xl bg-pink-500/5 dark:bg-pink-500/10 text-xl">
+                              {getEmojiForAccessory(acc.name)}
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-gray-700 dark:text-gray-200 group-hover:text-pink-500 dark:group-hover:text-pink-300">
+                                {acc.name}
+                              </div>
+                              <div className="text-[9px] text-gray-400 dark:text-gray-550">
+                                {acc.shape.toUpperCase()} • Añadir al visor
+                              </div>
+                            </div>
+                          </div>
+                          <Plus className="w-4 h-4 text-gray-400 group-hover:text-pink-500 group-hover:scale-110 transition-all mr-1.5" />
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  <Plus className="w-4 h-4 text-slate-400 group-hover:text-pink-500 group-hover:scale-110 transition-all" />
-                </button>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* TAB 6: STUDIO BACKGROUND */}
         {activeTab === 'scene' && (

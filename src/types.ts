@@ -27,6 +27,8 @@ export interface Part {
     ridges?: number;    // segment waves / layer ridges (0 to 1)
     noise?: number;     // hand-sculpted organic clay bumps (0 to 1)
   };
+  earBend?: number;     // -1 to 1: Bends/curves the structure (for organic ears)
+  earFold?: number;     // -1 to 1: Extra inward/outward cup folding
 }
 
 export type EyeExpression = 'classic' | 'happy' | 'sleepy' | 'blinking' | 'anime';
@@ -41,6 +43,12 @@ export interface FaceConfig {
   mouthColor: string;
   eyeSpacing: number; // multiplier for eye distance
   eyeHeight: number;  // multiplier for eye height relative to face base
+  eyeSize?: number;     // multiplier for eyeball dimensions (0.4 to 2.5)
+  eyeRotation?: number; // tilt angle of eyes in degrees (-45 to 45)
+  eyeDepth?: number;    // depth forward-offset multiplier (0.5 to 1.8)
+  mouthSize?: number;   // multiplier for mouth width/dimensions (0.4 to 2.5)
+  mouthHeight?: number; // vertical height modifier relative to face base (0.2 to 2.5)
+  mouthDepth?: number;  // depth forward-offset multiplier for mouth (0.5 to 1.8)
 }
 
 export interface AnimalPreset {
