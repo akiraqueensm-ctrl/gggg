@@ -1116,7 +1116,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         eyeGroup.quaternion.copy(alignQuat);
 
         // Add additional eye tilt degree
-        const tiltZ = THREE.MathUtils.degToRad(eyeRotDeg) * sideMult;
+        const tiltZ = THREE.MathUtils.degToRad(eyeRotDeg) * -sideMult;
         const tiltQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), tiltZ);
         eyeGroup.quaternion.multiply(tiltQuat);
 
@@ -1129,18 +1129,21 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
           eyeGroup.add(eyeMesh);
 
           const shine1 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.35, 12, 12), shineMat);
-          shine1.position.set(size * 0.25, size * 0.25, size * 0.72);
+          // Mirror shine positions using sideMult for symmetric highlights
+          shine1.position.set(size * 0.25 * sideMult, size * 0.25, size * 0.72);
           eyeGroup.add(shine1);
 
           if (face.eyeStyle === 'anime') {
             const shine2 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.18, 12, 12), shineMat);
-            shine2.position.set(-size * 0.25, -size * 0.25, size * 0.72);
+            shine2.position.set(-size * 0.25 * sideMult, -size * 0.25, size * 0.72);
             eyeGroup.add(shine2);
           }
         } 
         else if (face.eyeStyle === 'happy') {
           const arcGeo = new THREE.TorusGeometry(0.06 * eyeSizeMultiplier, 0.015 * eyeSizeMultiplier, 8, 24, Math.PI);
           const arcMesh = new THREE.Mesh(arcGeo, eyeMat);
+          // Rotate by Math.PI so the curve is inverted (smiling ^)
+          arcMesh.rotation.set(0, 0, Math.PI);
           eyeGroup.add(arcMesh);
         } 
         else if (face.eyeStyle === 'sleepy') {
@@ -1151,6 +1154,8 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         else if (face.eyeStyle === 'blinking') {
           const arcGeo = new THREE.TorusGeometry(0.06 * eyeSizeMultiplier, 0.015 * eyeSizeMultiplier, 8, 24, Math.PI);
           const arcMesh = new THREE.Mesh(arcGeo, eyeMat);
+          // Default rotation for blinking curve (standard U)
+          arcMesh.rotation.set(0, 0, 0);
           eyeGroup.add(arcMesh);
         }
 
