@@ -17,6 +17,12 @@ interface ThreeCanvasProps {
   showPedestal: boolean;
   showGrid: boolean;
   shadowColor: string;
+  isFlexible?: boolean;
+  segmentCount?: number;
+  segmentSpacing?: number;
+  connectorType?: 'ring' | 'ball' | 'flexible';
+  wiggleSpeed?: number;
+  wiggleAmplitude?: number;
 }
 
 export interface ThreeCanvasHandle {
@@ -31,6 +37,12 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
   onSelectPart,
   showPedestal = true,
   showGrid = true,
+  isFlexible = false,
+  segmentCount = 5,
+  segmentSpacing = 0.32,
+  connectorType = 'ring',
+  wiggleSpeed = 2.0,
+  wiggleAmplitude = 0.15,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,6 +56,27 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
   const outlineMeshRef = useRef<THREE.LineSegments | null>(null);
   const pedestalRef = useRef<THREE.Mesh | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
+
+  // Store flexible configurations in a Ref to read in the render loop without lagging
+  const wiggleParamsRef = useRef({
+    isFlexible,
+    segmentCount,
+    segmentSpacing,
+    connectorType,
+    wiggleSpeed,
+    wiggleAmplitude,
+  });
+
+  useEffect(() => {
+    wiggleParamsRef.current = {
+      isFlexible,
+      segmentCount,
+      segmentSpacing,
+      connectorType,
+      wiggleSpeed,
+      wiggleAmplitude,
+    };
+  }, [isFlexible, segmentCount, segmentSpacing, connectorType, wiggleSpeed, wiggleAmplitude]);
 
   // Expose export and reset capabilities to parent component
   useImperativeHandle(ref, () => ({
@@ -201,8 +234,6 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         }
       }
       
-      // If clicked empty space, do not auto deselect if they clicked off but still on editor, 
-      // but let's allow deselecting by clicking grid
       const intersectsPedestal = raycaster.intersectObject(pedestal);
       if (intersectsPedestal.length > 0) {
         onSelectPart(null);
@@ -218,12 +249,39 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
       
-      // Gentle floating animation to the animal group to make it feel extra alive!
       if (animalGroup) {
         const elapsedTime = clock.getElapsedTime();
-        // subtle bobbing: only bob when nothing is selected to prevent slider jump, or just make it very quiet
-        // We'll keep it static during editing or extremely subtle (e.g., amplitude 0.01) so it doesn't disturb editing position
-        animalGroup.position.y = Math.sin(elapsedTime * 1.5) * 0.015;
+        // Gentle static bobbing overall
+        animalGroup.position.y = Math.sin(elapsedTime * 1.5) * 0.012;
+
+        const currentParams = wiggleParamsRef.current;
+        if (currentParams.isFlexible) {
+          const amp = currentParams.wiggleAmplitude;
+          const speed = currentParams.wiggleSpeed;
+          animalGroup.children.forEach((child) => {
+            // Check if it is a segment to apply elegant snake curve wiggle
+            if (child.name && child.name.startsWith('Segment_')) {
+              const partsName = child.name.split('_');
+              const idx = parseInt(partsName[1], 10);
+              if (idx > 0) {
+                // Wave/serpentine lateral angle
+                const waveAngle = Math.sin(elapsedTime * speed * 3.0 - idx * 0.7) * (amp * 0.65);
+                child.rotation.y = waveAngle;
+                
+                // Keep connected by offsetting along elegant wiggle arc path
+                child.position.x = child.userData.baseX + Math.sin(elapsedTime * speed * 3.0 - idx * 0.7) * (amp * 0.28) * idx;
+              }
+            }
+          });
+        } else {
+          // Reset segment offsets
+          animalGroup.children.forEach((child) => {
+            if (child.name && child.name.startsWith('Segment_')) {
+              child.rotation.y = 0;
+              child.position.x = child.userData.baseX || 0;
+            }
+          });
+        }
       }
 
       controls.update();
@@ -237,14 +295,13 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       if (!entries || entries.length === 0) return;
       let { width: newWidth, height: newHeight } = entries[0].contentRect;
       
-      // Ensure we don't scale the renderer/canvas down to 0 or crash on division by zero
       if (newWidth <= 0 || newHeight <= 0) {
         const rect = containerRef.current?.getBoundingClientRect();
         if (rect && rect.width > 0 && rect.height > 0) {
           newWidth = rect.width;
           newHeight = rect.height;
         } else {
-          return; // Ignore temporary transitions to zero size
+          return; // Ignore temporary transitions
         }
       }
       
@@ -266,7 +323,6 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         renderer.domElement.removeEventListener('click', handleCanvasClick);
       }
       renderer.dispose();
-      // Dispose geometries & materials
       scene.clear();
     };
   }, []); // Run once on mount
@@ -286,7 +342,6 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
     // Clear previous meshes
     while (animalGroup.children.length > 0) {
       const child = animalGroup.children[0];
-      // Dispose materials & geometries recursion
       child.traverse((node) => {
         if (node instanceof THREE.Mesh) {
           node.geometry.dispose();
@@ -300,27 +355,22 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       animalGroup.remove(child);
     }
 
-    // Helper functions for geometry generation
-    const getGeometry = (shape: string, scale: [number, number, number]) => {
+    // Geometry Factory
+    const getGeometry = (shape: string) => {
       let geo: THREE.BufferGeometry;
-      
       switch (shape) {
         case 'box':
-          // Slightly rounded corners are built by using BoxGeometry, 
-          // but standard is fine
           geo = new THREE.BoxGeometry(1, 1, 1);
           break;
         case 'capsule':
-          // Cylindrical shape with hemisphere caps 
           geo = new THREE.CapsuleGeometry(0.5, 0.6, 16, 24);
           break;
         case 'cylinder':
-          geo = new THREE.CylinderGeometry(0.5, 0.5, 1, 32);
+          geo = new THREE.CylinderGeometry(0.48, 0.48, 1, 32);
           break;
         case 'cone':
           geo = new THREE.ConeGeometry(0.5, 1, 32);
-          // offset cone center so pivot point is at the base
-          geo.translate(0, 0.5, 0);
+          geo.translate(0, 0.5, 0); // offset cone center so pivot is at base
           break;
         case 'torus':
           geo = new THREE.TorusGeometry(0.4, 0.12, 12, 48);
@@ -333,74 +383,272 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       return geo;
     };
 
+    // Store references of body parts to organize layout parenting easily
+    const bodyPart = parts.find(p => p.id === 'body');
+    const headPart = parts.find(p => p.id === 'head');
+
+    // If structure is flexible, Segment 0 holds the main position, and we parent appendages elegantly!
+    const segmentMeshes: THREE.Mesh[] = [];
+
     // Render configuration Parts
     parts.forEach((part) => {
       if (!part.visible) return;
 
-      const geometry = getGeometry(part.shape, part.scale);
+      // EXCEPTION: If flexible and part is body, we generate continuous segments connected by links
+      if (isFlexible && part.id === 'body') {
+        const material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(part.color),
+          roughness: part.roughness ?? 0.8,
+          metalness: part.metalness ?? 0.15,
+        });
+
+        for (let idx = 0; idx < segmentCount; idx++) {
+          // Slowly taper segments down
+          const t = segmentCount > 1 ? idx / (segmentCount - 1) : 0;
+          const scaleFactor = Math.max(0.24, 1.0 - t * 0.62);
+
+          const segGeo = getGeometry(part.shape);
+          const segMesh = new THREE.Mesh(segGeo, material);
+          
+          segMesh.name = `Segment_${idx}`;
+          // Make it selectable as the primary body part
+          segMesh.userData = { 
+            partId: part.id, 
+            isSegment: true, 
+            segmentIndex: idx,
+            baseX: part.position[0],
+            baseY: part.position[1],
+            baseZ: part.position[2] - idx * segmentSpacing
+          };
+
+          segMesh.position.set(
+            part.position[0],
+            part.position[1],
+            part.position[2] - idx * segmentSpacing
+          );
+
+          segMesh.scale.set(
+            part.scale[0] * scaleFactor,
+            part.scale[1] * scaleFactor,
+            part.scale[2] * scaleFactor
+          );
+
+          // Apply slight tilt downwards towards the tail
+          segMesh.rotation.set(
+            THREE.MathUtils.degToRad(part.rotation[0] + idx * 1.5),
+            THREE.MathUtils.degToRad(part.rotation[1]),
+            THREE.MathUtils.degToRad(part.rotation[2])
+          );
+
+          segMesh.castShadow = true;
+          segMesh.receiveShadow = true;
+
+          // Render interlocking loop joint connectors
+          if (idx < segmentCount - 1) {
+            const nextT = (idx + 1) / (segmentCount - 1);
+            const nextScaleFactor = Math.max(0.24, 1.0 - nextT * 0.62);
+            
+            // Connective link color: gold or shiny metal for standard feedback
+            const linkColor = '#ffd300';
+            const linkMaterial = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(linkColor),
+              metalness: 0.9,
+              roughness: 0.1,
+            });
+
+            const linkRadius = segmentSpacing * 0.22;
+            const linkThickness = segmentSpacing * 0.045;
+
+            if (connectorType === 'ring') {
+              // Torus A: Vertical ring attached to segment idx
+              const torusAGeo = new THREE.TorusGeometry(linkRadius, linkThickness, 12, 24);
+              const torusAMesh = new THREE.Mesh(torusAGeo, linkMaterial);
+              torusAMesh.name = `JointRingA_${idx}`;
+              torusAMesh.position.set(0, 0, -segmentSpacing * 0.35);
+              torusAMesh.scale.set(1.1, 1.1, 1.1);
+              segMesh.add(torusAMesh);
+
+              // Torus B: Horizontal ring (offset to overlap and interlock vertically)
+              const torusBGeo = new THREE.TorusGeometry(linkRadius * 1.05, linkThickness, 12, 24);
+              const torusBMesh = new THREE.Mesh(torusBGeo, linkMaterial);
+              torusBMesh.name = `JointRingB_${idx}`;
+              torusBMesh.position.set(0, 0, -segmentSpacing * 0.65);
+              torusBMesh.rotation.set(Math.PI / 2, 0, 0); // rotated to lock with Ring A!
+              segMesh.add(torusBMesh);
+            } 
+            else if (connectorType === 'ball') {
+              // Standard socket ball joint
+              const ballGeo = new THREE.SphereGeometry(linkRadius * 1.3, 16, 16);
+              const ballMesh = new THREE.Mesh(ballGeo, linkMaterial);
+              ballMesh.name = `JointBall_${idx}`;
+              ballMesh.position.set(0, 0, -segmentSpacing * 0.5);
+              segMesh.add(ballMesh);
+            } 
+            else if (connectorType === 'flexible') {
+              // A ribbed accordion bellow link
+              const flexibleGeo = new THREE.CylinderGeometry(linkRadius * 1.1, linkRadius * 1.1, segmentSpacing * 0.45, 12);
+              const flexibleMesh = new THREE.Mesh(flexibleGeo, linkMaterial);
+              flexibleMesh.name = `JointBellow_${idx}`;
+              flexibleMesh.position.set(0, 0, -segmentSpacing * 0.5);
+              flexibleMesh.rotation.set(Math.PI / 2, 0, 0); // turn horizontal
+              segMesh.add(flexibleMesh);
+            }
+          }
+
+          animalGroup.add(segMesh);
+          segmentMeshes.push(segMesh);
+        }
+        return; // Finished body segment loop
+      }
+
+      // EXCEPTION: reposition limbs & tails to correct parents if flexible structure is active
+      const geometry = getGeometry(part.shape);
       const material = new THREE.MeshStandardMaterial({
         color: new THREE.Color(part.color),
         roughness: part.roughness ?? 0.8,
         metalness: part.metalness ?? 0.15,
-        bumpScale: 0.05,
       });
 
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = part.name;
       mesh.userData = { partId: part.id };
 
-      // Apply transformations
-      mesh.position.set(part.position[0], part.position[1], part.position[2]);
-      mesh.scale.set(part.scale[0], part.scale[1], part.scale[2]);
-      
-      // Euler rotation (convert degrees to radians)
-      mesh.rotation.set(
-        THREE.MathUtils.degToRad(part.rotation[0]),
-        THREE.MathUtils.degToRad(part.rotation[1]),
-        THREE.MathUtils.degToRad(part.rotation[2])
-      );
-
       mesh.castShadow = true;
       mesh.receiveShadow = true;
 
-      animalGroup.add(mesh);
+      if (isFlexible && segmentMeshes.length > 0) {
+        const bodyY = bodyPart?.position[1] ?? 0.45;
+        const bodyScaleVec = bodyPart?.scale ?? [1, 1, 1];
+
+        if (part.id === 'head') {
+          // Attached to Segment 0 (front anchor)
+          mesh.position.set(part.position[0], part.position[1], part.position[2]);
+          mesh.scale.set(part.scale[0], part.scale[1], part.scale[2]);
+          mesh.rotation.set(
+            THREE.MathUtils.degToRad(part.rotation[0]),
+            THREE.MathUtils.degToRad(part.rotation[1]),
+            THREE.MathUtils.degToRad(part.rotation[2])
+          );
+          animalGroup.add(mesh);
+        }
+        else if (part.id.includes('tail')) {
+          // Tail is dynamically attached as a child of the VERY LAST Segment to wiggle natively!
+          const lastIdx = segmentCount - 1;
+          const lastSegMesh = segmentMeshes[lastIdx];
+          
+          // Calculate relative position to Last Segment's center
+          // Last segment is located at [0, bodyY, bodyZ - lastIdx * segmentSpacing]
+          const targetZOffset = -(part.scale[2] * 0.35 + segmentSpacing * 0.28);
+          mesh.position.set(0, 0, targetZOffset);
+          
+          // Tail scale is nested to last segment scale factor
+          const lastScaleFactor = Math.max(0.24, 1.0 - (lastIdx / (segmentCount - 1)) * 0.62);
+          mesh.scale.set(
+            part.scale[0] / (bodyScaleVec[0] * lastScaleFactor),
+            part.scale[1] / (bodyScaleVec[1] * lastScaleFactor),
+            part.scale[2] / (bodyScaleVec[2] * lastScaleFactor)
+          );
+
+          mesh.rotation.set(
+            THREE.MathUtils.degToRad(part.rotation[0]),
+            THREE.MathUtils.degToRad(part.rotation[1]),
+            THREE.MathUtils.degToRad(part.rotation[2])
+          );
+
+          lastSegMesh.add(mesh);
+        }
+        else if (part.id === 'leg_l' || part.id === 'leg_r') {
+          // Back legs attach to segment S (towards the back)
+          const attachmentIdx = Math.max(1, segmentCount - 2);
+          const parentSegMesh = segmentMeshes[attachmentIdx];
+          
+          const sideFactor = part.id === 'leg_l' ? -1 : 1;
+          const scaleFactorAtAttachment = Math.max(0.24, 1.0 - (attachmentIdx / (segmentCount - 1)) * 0.62);
+
+          // Local coordinate offsets
+          mesh.position.set(
+            part.position[0],
+            -0.3, // keep on ground relative to body segment center
+            0
+          );
+
+          mesh.scale.set(
+            part.scale[0] / scaleFactorAtAttachment,
+            part.scale[1] / scaleFactorAtAttachment,
+            part.scale[2] / scaleFactorAtAttachment
+          );
+
+          mesh.rotation.set(
+            THREE.MathUtils.degToRad(part.rotation[0]),
+            THREE.MathUtils.degToRad(part.rotation[1]),
+            THREE.MathUtils.degToRad(part.rotation[2])
+          );
+
+          parentSegMesh.add(mesh);
+        }
+        else if (part.id === 'arm_l' || part.id === 'arm_r') {
+          // Front legs attach as children of Segment 0
+          const seg0Mesh = segmentMeshes[0];
+          mesh.position.set(part.position[0], 0, 0.1);
+          mesh.scale.set(part.scale[0], part.scale[1], part.scale[2]);
+          mesh.rotation.set(
+            THREE.MathUtils.degToRad(part.rotation[0]),
+            THREE.MathUtils.degToRad(part.rotation[1]),
+            THREE.MathUtils.degToRad(part.rotation[2])
+          );
+          seg0Mesh.add(mesh);
+        }
+        else {
+          // General accessory or fangs/horns
+          mesh.position.set(part.position[0], part.position[1], part.position[2]);
+          mesh.scale.set(part.scale[0], part.scale[1], part.scale[2]);
+          mesh.rotation.set(
+            THREE.MathUtils.degToRad(part.rotation[0]),
+            THREE.MathUtils.degToRad(part.rotation[1]),
+            THREE.MathUtils.degToRad(part.rotation[2])
+          );
+          animalGroup.add(mesh);
+        }
+      } else {
+        // Standard non-flexible model loading
+        mesh.position.set(part.position[0], part.position[1], part.position[2]);
+        mesh.scale.set(part.scale[0], part.scale[1], part.scale[2]);
+        mesh.rotation.set(
+          THREE.MathUtils.degToRad(part.rotation[0]),
+          THREE.MathUtils.degToRad(part.rotation[1]),
+          THREE.MathUtils.degToRad(part.rotation[2])
+        );
+        animalGroup.add(mesh);
+      }
     });
 
     // RENDER FACE DETAILS INSIDE HEAD MESH CONTAINER
-    // We attach them to a "head" local system so they move, rotate, scale and animate dynamically with Head alterations!
-    const headPart = parts.find(p => p.id === 'head');
     if (headPart && headPart.visible) {
-      // Find head mesh in animalGroup to get its world scale/pivot or we can create a face container group
       const faceGroup = new THREE.Group();
       faceGroup.name = 'FaceFeatures';
       
-      // Place face relative to head position
-      // Head center is headPart.position. Let's orient child elements relative to it.
       faceGroup.position.set(headPart.position[0], headPart.position[1], headPart.position[2]);
-      // Apply same rotation as head so it points forward with head!
       faceGroup.rotation.set(
         THREE.MathUtils.degToRad(headPart.rotation[0]),
         THREE.MathUtils.degToRad(headPart.rotation[1]),
         THREE.MathUtils.degToRad(headPart.rotation[2])
       );
-      // Face group scale is locked to head scale so eyes and mouth scale together nicely!
       faceGroup.scale.set(headPart.scale[0], headPart.scale[1], headPart.scale[2]);
 
       // Eye Material
       const eyeMat = new THREE.MeshStandardMaterial({
         color: new THREE.Color(face.eyeColor),
         roughness: 0.1,
-        metalness: 0.9, // glossy anime eyeballs!
+        metalness: 0.9,
       });
 
-      // Highlight spot material (pure white emission for reflection)
+      // Pure white glint reflecting sparkle
       const shineMat = new THREE.MeshStandardMaterial({
         color: new THREE.Color('#ffffff'),
         roughness: 0.1,
         metalness: 0.0,
       });
 
-      // Cheek Material
       const cheekMat = new THREE.MeshStandardMaterial({
         color: new THREE.Color(face.cheekColor),
         roughness: 0.9,
@@ -409,7 +657,6 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         opacity: 0.7,
       });
 
-      // Mouth Material
       const mouthMat = new THREE.MeshStandardMaterial({
         color: new THREE.Color(face.mouthColor),
         roughness: 0.8,
@@ -418,9 +665,8 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
 
       const eyeDistanceX = 0.22 * face.eyeSpacing;
       const eyeHeightY = 0.08 * face.eyeHeight;
-      const faceZOffset = 0.44; // Sitting on front surface of the sphere (radius 0.5 * headScale.z)
+      const faceZOffset = 0.44;
 
-      // 1. EYES GENERATION
       const createEyeball = (isLeft: boolean) => {
         const sideMult = isLeft ? -1 : 1;
         const eyeGroup = new THREE.Group();
@@ -428,20 +674,16 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         eyeGroup.position.set(eyeDistanceX * sideMult, eyeHeightY, faceZOffset - 0.02);
 
         if (face.eyeStyle === 'classic' || face.eyeStyle === 'anime') {
-          // Sphere eye
           const size = face.eyeStyle === 'anime' ? 0.09 : 0.065;
           const eyeGeo = new THREE.SphereGeometry(size, 16, 16);
           const eyeMesh = new THREE.Mesh(eyeGeo, eyeMat);
-          eyeMesh.scale.set(1, face.eyeStyle === 'anime' ? 1.3 : 1, 0.75); // make anime eyes oval!
+          eyeMesh.scale.set(1, face.eyeStyle === 'anime' ? 1.3 : 1, 0.75);
           eyeGroup.add(eyeMesh);
 
-          // Shiny sparkle highlight overlays
           const shine1 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.35, 12, 12), shineMat);
-          // Position spark slightly forward and top-right relative to eyeball
           shine1.position.set(size * 0.35, size * 0.35, size * 0.65);
           eyeGroup.add(shine1);
 
-          // Secondary minor sparkle (double shininess!)
           if (face.eyeStyle === 'anime') {
             const shine2 = new THREE.Mesh(new THREE.SphereGeometry(size * 0.2, 12, 12), shineMat);
             shine2.position.set(-size * 0.25, -size * 0.3, size * 0.65);
@@ -449,20 +691,17 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
           }
         } 
         else if (face.eyeStyle === 'happy') {
-          // Upside down curved ring
           const arcGeo = new THREE.TorusGeometry(0.06, 0.015, 8, 24, Math.PI);
           const arcMesh = new THREE.Mesh(arcGeo, eyeMat);
-          arcMesh.rotation.set(0, 0, Math.PI); // rotate to form high arch
+          arcMesh.rotation.set(0, 0, Math.PI);
           eyeGroup.add(arcMesh);
         } 
         else if (face.eyeStyle === 'sleepy') {
-          // Flat horizontal line
           const barGeo = new THREE.BoxGeometry(0.12, 0.02, 0.02);
           const barMesh = new THREE.Mesh(barGeo, eyeMat);
           eyeGroup.add(barMesh);
         } 
         else if (face.eyeStyle === 'blinking') {
-          // Standard curved ring (u shape)
           const arcGeo = new THREE.TorusGeometry(0.06, 0.015, 8, 24, Math.PI);
           const arcMesh = new THREE.Mesh(arcGeo, eyeMat);
           eyeGroup.add(arcMesh);
@@ -471,16 +710,15 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         faceGroup.add(eyeGroup);
       };
 
-      createEyeball(true);  // Left Eye
-      createEyeball(false); // Right Eye
+      createEyeball(true);
+      createEyeball(false);
 
-      // 2. CHEEKS GENERATION (BLUSH)
       if (face.hasCheeks) {
         const cheekSize = 0.08;
         const leftCheek = new THREE.Mesh(new THREE.SphereGeometry(cheekSize, 16, 12), cheekMat);
         leftCheek.name = 'LeftCheekBlush';
         leftCheek.position.set(-eyeDistanceX - 0.06, eyeHeightY - 0.12, faceZOffset - 0.06);
-        leftCheek.scale.set(1.4, 0.6, 0.4); // squashed pink egg under eye!
+        leftCheek.scale.set(1.4, 0.6, 0.4);
         
         const rightCheek = leftCheek.clone();
         rightCheek.name = 'RightCheekBlush';
@@ -490,11 +728,8 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
         faceGroup.add(rightCheek);
       }
 
-      // 3. MOUTH GENERATION
       const mouthGroup = new THREE.Group();
       mouthGroup.name = 'Mouth';
-      // Placed slightly below eyes and on snout surface (which sits at z=0.35 + snout size)
-      // Standard snout position is snout is at Z = 0.35, scale is Z = 0.15, so snout front is around Z=0.42. Let's make it sit on Z=0.48!
       mouthGroup.position.set(0, eyeHeightY - 0.1, faceZOffset + 0.04);
 
       if (face.mouthStyle === 'dot') {
@@ -506,38 +741,33 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       else if (face.mouthStyle === 'smile') {
         const torusGeo = new THREE.TorusGeometry(0.05, 0.012, 8, 24, Math.PI);
         const smileMesh = new THREE.Mesh(torusGeo, mouthMat);
-        smileMesh.rotation.set(0, 0, 0); // smiling U-shape
         mouthGroup.add(smileMesh);
       }
       else if (face.mouthStyle === 'sad') {
         const torusGeo = new THREE.TorusGeometry(0.05, 0.012, 8, 24, Math.PI);
         const sadMesh = new THREE.Mesh(torusGeo, mouthMat);
-        sadMesh.rotation.set(0, 0, Math.PI); // sad arch
+        sadMesh.rotation.set(0, 0, Math.PI);
         mouthGroup.add(sadMesh);
       }
       else if (face.mouthStyle === 'open') {
         const cylinderGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.01, 24);
         const openMesh = new THREE.Mesh(cylinderGeo, mouthMat);
-        openMesh.rotation.set(Math.PI / 2, 0, 0); // open circle
+        openMesh.rotation.set(Math.PI / 2, 0, 0);
         mouthGroup.add(openMesh);
       }
       else if (face.mouthStyle === 'wiggle') {
-        // Double cute cat mouth ':3'
         const rw = 0.035;
         const torusGeo = new THREE.TorusGeometry(rw, 0.011, 8, 24, Math.PI);
         
         const curlL = new THREE.Mesh(torusGeo, mouthMat);
         curlL.position.set(-rw, 0, 0);
-        curlL.rotation.set(0, 0, 0); // U-shape
 
         const curlR = new THREE.Mesh(torusGeo, mouthMat);
         curlR.position.set(rw, 0, 0);
-        curlR.rotation.set(0, 0, 0); // U-shape
 
         mouthGroup.add(curlL);
         mouthGroup.add(curlR);
         
-        // Add tiny black nose dot above the wiggle mouth
         const tinyNose = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 10), mouthMat);
         tinyNose.position.set(0, 0.035, 0);
         tinyNose.scale.set(1.3, 0.8, 0.8);
@@ -548,23 +778,17 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       animalGroup.add(faceGroup);
     }
 
-    // DRAW EXTRAS / RE-HIGHLIGHT THE SELECTED PART
+    // Highlighting current selected part with outlines
     if (selectedPartId) {
-      // Find the mesh with this ID
       const targetMesh = animalGroup.children.find(c => c.userData && c.userData.partId === selectedPartId) as THREE.Mesh;
       if (targetMesh) {
-        // Create bounding frame / box helper
-        const boxHelper = new THREE.BoxHelper(targetMesh, '#ec4899'); // pink border edge!
-        
-        // Convert to Lines segments and style
+        const boxHelper = new THREE.BoxHelper(targetMesh, '#ec4899');
         if (boxHelper.material instanceof THREE.LineBasicMaterial) {
-          boxHelper.material.linewidth = 2; // ignored by some implementations, but good practice
-          boxHelper.material.depthTest = false; // Always render on top!
+          boxHelper.material.linewidth = 2;
+          boxHelper.material.depthTest = false;
         }
-        
         boxHelper.name = 'SelectionOutline';
-        boxHelper.renderOrder = 999; // Draw on top
-        
+        boxHelper.renderOrder = 999;
         animalGroup.add(boxHelper);
         outlineMeshRef.current = boxHelper as any;
       }
@@ -572,7 +796,7 @@ export const ThreeCanvas = forwardRef<ThreeCanvasHandle, ThreeCanvasProps>(({
       outlineMeshRef.current = null;
     }
 
-  }, [parts, face, selectedPartId]);
+  }, [parts, face, selectedPartId, isFlexible, segmentCount, segmentSpacing, connectorType]);
 
   return (
     <div
