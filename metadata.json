@@ -1,0 +1,6 @@
+{
+  "name": "Cute 3D Animal Creator",
+  "description": "Create, customize, and export adorable 3D animals to OBJ files directly in your browser with simple controls and custom templates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
